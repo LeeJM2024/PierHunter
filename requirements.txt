@@ -1,0 +1,14 @@
+# These packages are needed so the bundled LibHunter code can run locally.
+python-Levenshtein
+networkx
+tqdm
+asn1crypto
+lxml
+androguard==3.3.5
+fastapi
+uvicorn[standard]
+python-multipart
+celery[redis]
+SQLAlchemy
+psycopg2-binary
+python-dotenv

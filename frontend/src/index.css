@@ -1,0 +1,188 @@
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --soc-safe: oklch(70% 0.15 160); /* 降饱和的绿色 */
+  --soc-alert: oklch(65% 0.18 25); /* 降饱和的红色 */
+  --soc-high: oklch(75% 0.16 70); /* 降饱和的橙色 */
+  --soc-neutral: oklch(25% 0.02 260);
+  --soc-cyan: oklch(75% 0.12 220);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh; /* 使用dvh避免移动端布局跳动 */
+  font-family: "Geist", "Sora", "Noto Sans SC", sans-serif;
+  background: linear-gradient(135deg, oklch(15% 0.02 260) 0%, oklch(8% 0.01 260) 100%);
+  color: oklch(95% 0.01 260);
+}
+
+code,
+pre,
+.font-mono {
+  font-family: "Geist Mono", "JetBrains Mono", Consolas, monospace;
+  font-feature-settings: "calt" 0; /* 禁用连字，保持等宽字符清晰 */
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.35);
+  color: #f8fafc;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #09090b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+/* 自定义动画 */
+@keyframes danger-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  50% {
+    opacity: 0.9;
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+}
+
+@keyframes warning-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.3);
+  }
+  50% {
+    opacity: 0.9;
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0);
+  }
+}
+
+@keyframes subtle-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    filter: brightness(1);
+    box-shadow: 0 0 10px rgba(79, 70, 229, 0.3);
+  }
+  50% {
+    filter: brightness(1.1);
+    box-shadow: 0 0 20px rgba(79, 70, 229, 0.5);
+  }
+}
+
+.animate-danger-pulse {
+  animation: danger-pulse 2s ease-in-out infinite;
+}
+
+.animate-warning-pulse {
+  animation: warning-pulse 3s ease-in-out infinite;
+}
+
+.animate-subtle-pulse {
+  animation: subtle-pulse 4s ease-in-out infinite;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+/* 进度条动画 */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes spin-slow {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+/* 终端样式优化 */
+.terminal-font {
+  font-family: "IBM Plex Mono", "JetBrains Mono", Consolas, monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+}
+
+.terminal-green {
+  color: #10b981;
+}
+
+.terminal-gray {
+  color: #9ca3af;
+}
+
+.terminal-red {
+  color: #ef4444;
+}
+
+.terminal-yellow {
+  color: #f59e0b;
+}
+
+/* 极客风细节 */
+.geek-border {
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.6), rgba(2, 6, 23, 0.8));
+}
+
+.geek-glow {
+  box-shadow: 
+    0 0 20px rgba(56, 189, 248, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* 悬停效果 */
+.hover-lift {
+  transition: all 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+}

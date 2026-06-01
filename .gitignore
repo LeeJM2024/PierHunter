@@ -1,0 +1,105 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python bytecode and native artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.python-version
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# Logs
+*.log
+log.txt
+LibHunter/log.txt
+
+# Runtime data caches, uploads, reports, and scan outputs
+data/*
+!data/
+!data/cve_kb.json
+!data/.gitkeep
+data/apk_pickles_cache/
+data/lib_pickles_cache/
+data/lib_pickles_skeleton/
+data/lib_pickles_buckets/
+data/phunter_soot_cache/
+data/tpl_dex/
+data/tpl_jar/
+data/patches/
+storage/
+outputs/
+inputs/
+*.apk
+*.aab
+*.dex
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/.next/
+frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Docker / local generated artifacts
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# Codex / local assistant state
+.codex/
+.codex_sessions/
+
+# External or generated upstream folders
+libloom_upstream/
+TPL-CVEs/
+
+# PHunter generated or vendored-heavy artifacts
+PHunter/android-31/
+PHunter/lib/
+PHunter/META-INF/
+PHunter/real-sample/
+PHunter/sample/
+PHunter/src/
+PHunter/symbolicExec/
+PHunter/target/
+PHunter/PHunter-old.jar
+
+# LibHunter generated data/dependencies
+LibHunter/data/
+LibHunter/libs/
+LibHunter/module/__pycache__/

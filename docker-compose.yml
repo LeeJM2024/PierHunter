@@ -1,0 +1,110 @@
+services:
+  api:
+    image: acchunter-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn app:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://scanner:scanner@postgres:5432/scannerdb}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      STORAGE_DIR: ${STORAGE_DIR:-/app/storage}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/app/storage/uploads}
+      REPORT_DIR: ${REPORT_DIR:-/app/storage/reports}
+      LOG_DIR: ${LOG_DIR:-/app/storage/logs}
+      DATA_DIR: ${DATA_DIR:-/app/data}
+      PHUNTER_CACHE_DIR: ${PHUNTER_CACHE_DIR:-/app/data/phunter_soot_cache}
+      PICKLE_CACHE_DIR: ${PICKLE_CACHE_DIR:-/app/data/lib_pickles_cache}
+      APK_PICKLE_CACHE_DIR: ${APK_PICKLE_CACHE_DIR:-/app/data/apk_pickles_cache}
+      SKELETON_PICKLE_CACHE_DIR: ${SKELETON_PICKLE_CACHE_DIR:-/app/data/lib_pickles_skeleton}
+      BUCKET_PICKLE_CACHE_DIR: ${BUCKET_PICKLE_CACHE_DIR:-/app/data/lib_pickles_buckets}
+      LIBHUNTER_PROCESSES: ${LIBHUNTER_PROCESSES:-11}
+      PYTHON_BIN: ${PYTHON_BIN:-python3}
+      JAVA_BIN: ${JAVA_BIN:-java}
+      ANDROID_JAR_PATH: ${ANDROID_JAR_PATH:-/app/PHunter/android-31/android.jar}
+      PHUNTER_JAR_PATH: ${PHUNTER_JAR_PATH:-/app/PHunter/PHunter.jar}
+      OUTPUT_DIR: ${OUTPUT_DIR:-/app/outputs}
+      RAW_DIR: ${RAW_DIR:-/app/outputs/raw}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data:ro
+      - ./storage:/app/storage
+      - ./outputs:/app/outputs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  worker:
+    image: acchunter-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    cpus: ${WORKER_CPUS:-11}
+    command: celery -A backend.celery_app.celery_app worker --loglevel=info --concurrency=1
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://scanner:scanner@postgres:5432/scannerdb}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      STORAGE_DIR: ${STORAGE_DIR:-/app/storage}
+      UPLOAD_DIR: ${UPLOAD_DIR:-/app/storage/uploads}
+      REPORT_DIR: ${REPORT_DIR:-/app/storage/reports}
+      LOG_DIR: ${LOG_DIR:-/app/storage/logs}
+      DATA_DIR: ${DATA_DIR:-/app/data}
+      PHUNTER_CACHE_DIR: ${PHUNTER_CACHE_DIR:-/app/data/phunter_soot_cache}
+      PICKLE_CACHE_DIR: ${PICKLE_CACHE_DIR:-/app/data/lib_pickles_cache}
+      APK_PICKLE_CACHE_DIR: ${APK_PICKLE_CACHE_DIR:-/app/data/apk_pickles_cache}
+      SKELETON_PICKLE_CACHE_DIR: ${SKELETON_PICKLE_CACHE_DIR:-/app/data/lib_pickles_skeleton}
+      BUCKET_PICKLE_CACHE_DIR: ${BUCKET_PICKLE_CACHE_DIR:-/app/data/lib_pickles_buckets}
+      LIBHUNTER_PROCESSES: ${LIBHUNTER_PROCESSES:-11}
+      PYTHON_BIN: ${PYTHON_BIN:-python3}
+      JAVA_BIN: ${JAVA_BIN:-java}
+      ANDROID_JAR_PATH: ${ANDROID_JAR_PATH:-/app/PHunter/android-31/android.jar}
+      PHUNTER_JAR_PATH: ${PHUNTER_JAR_PATH:-/app/PHunter/PHunter.jar}
+      OUTPUT_DIR: ${OUTPUT_DIR:-/app/outputs}
+      RAW_DIR: ${RAW_DIR:-/app/outputs/raw}
+    volumes:
+      - ./data:/app/data:ro
+      - ./storage:/app/storage
+      - ./outputs:/app/outputs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-scannerdb}
+      POSTGRES_USER: ${POSTGRES_USER:-scanner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scanner}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-scanner} -d ${POSTGRES_DB:-scannerdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
