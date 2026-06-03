@@ -565,77 +565,79 @@ def run_libhunter(apk_path: str | Path) -> dict:
     apk_input_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Some mounted filesystems reject metadata updates such as utime/chmod.
-    # LibHunter only needs the APK bytes here, not source file metadata.
-    shutil.copyfile(apk_path, apk_input_dir / apk_path.name)
+    try:
+        # Some mounted filesystems reject metadata updates such as utime/chmod.
+        # LibHunter only needs the APK bytes here, not source file metadata.
+        shutil.copyfile(apk_path, apk_input_dir / apk_path.name)
 
-    cmd = [
-        str(PYTHON_BIN),
-        str(LIBHUNTER_SCRIPT),
-        "detect_all",
-        "-o", str(output_dir),
-        "-af", str(apk_input_dir),
-        "-p", str(LIBHUNTER_PROCESSES),
-        "-ld", str(LIBHUNTER_TPLS_DEX),
-    ]
-    if LIBHUNTER_TPLS_JAR.exists():
-        cmd.extend(["-lf", str(LIBHUNTER_TPLS_JAR)])
+        cmd = [
+            str(PYTHON_BIN),
+            str(LIBHUNTER_SCRIPT),
+            "detect_all",
+            "-o", str(output_dir),
+            "-af", str(apk_input_dir),
+            "-p", str(LIBHUNTER_PROCESSES),
+            "-ld", str(LIBHUNTER_TPLS_DEX),
+        ]
+        if LIBHUNTER_TPLS_JAR.exists():
+            cmd.extend(["-lf", str(LIBHUNTER_TPLS_JAR)])
 
-    result = run_logged_command(
-        cmd,
-        cwd=LIBHUNTER_DIR,
-        timeout=None,
-        env=env,
-        stream_output=True,
-        heartbeat_timeout=0,
-        stdout_log=LOG_DIR / f"libhunter_{apk_path.stem}.stdout.log",
-        stderr_log=LOG_DIR / f"libhunter_{apk_path.stem}.stderr.log",
-        suppress_terminal_patterns=_LIBHUNTER_NOISY_TERMINAL_PATTERNS,
-    )
+        result = run_logged_command(
+            cmd,
+            cwd=LIBHUNTER_DIR,
+            timeout=None,
+            env=env,
+            stream_output=True,
+            heartbeat_timeout=0,
+            stdout_log=LOG_DIR / f"libhunter_{apk_path.stem}.stdout.log",
+            stderr_log=LOG_DIR / f"libhunter_{apk_path.stem}.stderr.log",
+            suppress_terminal_patterns=_LIBHUNTER_NOISY_TERMINAL_PATTERNS,
+        )
 
-    # 如果命令“卡死”
-    if result.hung:
+        if result.hung:
+            return {
+                "status": "hung",
+                "cmd": result.cmd,
+                "returncode": result.returncode,
+                "raw_stdout": result.stdout,
+                "raw_stderr": result.stderr,
+                "result_file": None,
+                "detections": [],
+            }
+
+        result_candidates = (
+            output_dir / f"{apk_path.name}.json",
+            output_dir / f"{apk_path.stem}.json",
+            output_dir / f"{apk_path.name}.txt",
+            output_dir / f"{apk_path.stem}.txt",
+        )
+        result_file = next((f for f in result_candidates if f.exists()), result_candidates[2])
+
+        if result_file.exists():
+            parsed_source = result_file.read_text(encoding="utf-8", errors="replace")
+        else:
+            parsed_source = "\n".join(p for p in (result.stdout, result.stderr) if p)
+
+        detections = _parse_detection_text(parsed_source)
+
+        if result.returncode != 0:
+            status = "failed"
+        elif not detections:
+            status = "no_detections"
+        else:
+            status = "success"
+
         return {
-            "status": "hung",
+            "status": status,
             "cmd": result.cmd,
             "returncode": result.returncode,
             "raw_stdout": result.stdout,
             "raw_stderr": result.stderr,
             "result_file": None,
-            "detections": [],
+            "detections": detections,
         }
-
-    result_candidates = (
-        output_dir / f"{apk_path.name}.json",
-        output_dir / f"{apk_path.stem}.json",
-        output_dir / f"{apk_path.name}.txt",
-        output_dir / f"{apk_path.stem}.txt",
-    )
-    result_file = next((f for f in result_candidates if f.exists()), result_candidates[2])
-
-    if result_file.exists():
-        parsed_source = result_file.read_text(encoding="utf-8", errors="replace")
-    else:
-        parsed_source = "\n".join(p for p in (result.stdout, result.stderr) if p)
-
-    detections = _parse_detection_text(parsed_source)
-
-    if result.returncode != 0:
-        status = "failed"
-    elif not detections:
-        status = "no_detections"
-    else:
-        status = "success"
-
-    return {
-        "status": status,
-        "cmd": result.cmd,
-        "returncode": result.returncode,
-        "raw_stdout": result.stdout,
-        "raw_stderr": result.stderr,
-        "result_file": str(result_file) if result_file.exists() else None,
-        "detections": detections,
-    }
+    finally:
+        shutil.rmtree(run_root, ignore_errors=True)
 
 
 def _extract_float(pattern: re.Pattern[str], text: str) -> float | None:
