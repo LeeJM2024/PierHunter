@@ -9,6 +9,8 @@ import soot.options.Options;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -27,25 +29,29 @@ public class APKAnalyzer extends Analyzer {
                 config,
                 PHunterCacheSupport.DOMAIN_APK_ANALYSIS,
                 inputFile,
-                targetScope,
+                null,
                 logger
         );
         if (cachedClasses != null) {
-            this.allClasses = cachedClasses;
+            this.allClasses = selectClassesForScope(cachedClasses, targetScope);
             rebuildAllMethodsFromClasses();
             return;
         }
 
         SootCallGraph cg = analyze();
         buildCG(cg);
-        PHunterCacheSupport.storeAnalyzer(
-                config,
-                PHunterCacheSupport.DOMAIN_APK_ANALYSIS,
-                inputFile,
-                targetScope,
-                this.allClasses,
-                logger
-        );
+        if (targetScope.isEmpty()) {
+            PHunterCacheSupport.storeAnalyzer(
+                    config,
+                    PHunterCacheSupport.DOMAIN_APK_ANALYSIS,
+                    inputFile,
+                    null,
+                    this.allClasses,
+                    logger
+            );
+        } else {
+            logger.info("Skip storing scoped APK analysis; build the full APK cache with --prewarmAPKOnly first.");
+        }
     }
 
     private void initializeSoot() {
@@ -85,6 +91,75 @@ public class APKAnalyzer extends Analyzer {
         }
         cg.buildSootCallGraph();
         return cg;
+    }
+
+    private Map<String, ClassAttr> selectClassesForScope(Map<String, ClassAttr> classes, Set<String> rawScope) {
+        Set<String> scope = normalizeScope(rawScope);
+        if (scope.isEmpty()) {
+            return classes;
+        }
+        Set<String> prefixes = buildScopePrefixes(scope);
+        Map<String, ClassAttr> selected = new LinkedHashMap<>();
+        for (Map.Entry<String, ClassAttr> entry : classes.entrySet()) {
+            ClassAttr attr = entry.getValue();
+            String className = attr != null && attr.name != null ? attr.name : entry.getKey();
+            if (scope.contains(className) || startsWithAny(className, prefixes)) {
+                selected.put(entry.getKey(), attr);
+            }
+        }
+        logger.info(
+                "Loaded full APK cache and selected {} / {} classes for current limitClasses scope",
+                selected.size(),
+                classes.size()
+        );
+        return selected;
+    }
+
+    private Set<String> normalizeScope(Set<String> rawScope) {
+        Set<String> normalized = new LinkedHashSet<>();
+        if (rawScope == null) {
+            return normalized;
+        }
+        for (String scope : rawScope) {
+            if (scope == null) {
+                continue;
+            }
+            String value = scope.trim();
+            if (value.endsWith(".*")) {
+                value = value.substring(0, value.length() - 2);
+            }
+            if (value.endsWith(".")) {
+                value = value.substring(0, value.length() - 1);
+            }
+            if (!value.isEmpty()) {
+                normalized.add(value);
+            }
+        }
+        return normalized;
+    }
+
+    private Set<String> buildScopePrefixes(Set<String> scope) {
+        Set<String> prefixes = new LinkedHashSet<>();
+        for (String target : scope) {
+            prefixes.add(target + ".");
+            int lastDot = target.lastIndexOf('.');
+            if (lastDot > 0) {
+                prefixes.add(target.substring(0, lastDot + 1));
+            }
+        }
+        return prefixes;
+    }
+
+    private boolean startsWithAny(String className, Set<String> prefixes) {
+        if (className == null) {
+            return false;
+        }
+        for (String prefix : prefixes) {
+            if (className.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public String getAPKName() {

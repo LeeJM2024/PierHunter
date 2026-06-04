@@ -57,7 +57,7 @@ public final class PHunterCacheSupport {
             return null;
         }
         try {
-            List<String> normalizedScope = normalizeScope(scopeClasses);
+            List<String> normalizedScope = normalizeAnalyzerScope(domain, scopeClasses);
             String sourceHash = buildContentHash(sourceFile);
             String key = computeAnalyzerKey(sourceHash, normalizedScope);
             File entryDir = getEntryDir(config, domain, key);
@@ -111,7 +111,7 @@ public final class PHunterCacheSupport {
         }
         try {
             prepareAnalyzerForSerialization(allClasses);
-            List<String> normalizedScope = normalizeScope(scopeClasses);
+            List<String> normalizedScope = normalizeAnalyzerScope(domain, scopeClasses);
             String sourceHash = buildContentHash(sourceFile);
             String scopeHash = computeScopeHash(normalizedScope);
             String key = computeAnalyzerKey(sourceHash, normalizedScope);
@@ -218,12 +218,6 @@ public final class PHunterCacheSupport {
         }
     }
 
-    private static String computeAnalyzerKey(File sourceFile, Set<String> scopeClasses) throws IOException {
-        String sourceHash = buildContentHash(sourceFile);
-        List<String> normalizedScope = normalizeScope(scopeClasses);
-        return computeAnalyzerKey(sourceHash, normalizedScope);
-    }
-
     private static String computeAnalyzerKey(String sourceHash, List<String> normalizedScope) {
         if (normalizedScope.isEmpty()) {
             return sourceHash;
@@ -300,6 +294,13 @@ public final class PHunterCacheSupport {
         List<String> sorted = new ArrayList<>(normalized);
         sorted.sort(String::compareTo);
         return sorted;
+    }
+
+    private static List<String> normalizeAnalyzerScope(String domain, Set<String> scopeClasses) {
+        if (DOMAIN_APK_ANALYSIS.equals(domain)) {
+            return new ArrayList<>();
+        }
+        return normalizeScope(scopeClasses);
     }
 
     private static String computeScopeHash(List<String> normalizedScope) {

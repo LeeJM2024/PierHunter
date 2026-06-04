@@ -381,13 +381,6 @@ def _normalize_target_classes(target_classes: list[str] | None) -> list[str]:
     return _dedupe_preserve_order(normalized)
 
 
-def _scope_cache_label(target_classes: list[str] | None) -> str:
-    normalized = _normalize_target_classes(target_classes)
-    if not normalized:
-        return "full"
-    return _sha256_text("\n".join(normalized))[:12]
-
-
 def _is_cache_valid(pkl_path: Path, source_dex: Path) -> bool:
     if not pkl_path.exists():
         return False
@@ -954,7 +947,6 @@ def prewarm_phunter_templates_from_cve_kb(
 
 def prewarm_phunter_apk_cache(
     apk_path: str | Path,
-    target_classes: list[str] | None = None,
 ) -> dict:
     apk = Path(apk_path).expanduser().resolve()
     if not apk.exists():
@@ -978,15 +970,12 @@ def prewarm_phunter_apk_cache(
 
     java_opts_raw = os.getenv("PHUNTER_APK_PREWARM_JAVA_OPTS", "-XX:ActiveProcessorCount=1")
     java_opts = shlex.split(java_opts_raw)
-    normalized_target_classes = _normalize_target_classes(target_classes)
-    scope_label = _scope_cache_label(normalized_target_classes)
     phunter_env = dict(os.environ)
     phunter_env["PHUNTER_CACHE_DIR"] = str(PHUNTER_CACHE_DIR)
 
     cmd = build_phunter_cmd(
         apk_path=apk,
         thread_num=1,
-        target_classes=normalized_target_classes,
         java_opts=java_opts,
         prewarm_apk_only=True,
     )
@@ -997,8 +986,8 @@ def prewarm_phunter_apk_cache(
         env=phunter_env,
         stream_output=True,
         heartbeat_timeout=0,
-        stdout_log=LOG_DIR / f"phunter_prewarm_apk_{apk.stem}_{scope_label}.stdout.log",
-        stderr_log=LOG_DIR / f"phunter_prewarm_apk_{apk.stem}_{scope_label}.stderr.log",
+        stdout_log=LOG_DIR / f"phunter_prewarm_apk_{apk.stem}_full.stdout.log",
+        stderr_log=LOG_DIR / f"phunter_prewarm_apk_{apk.stem}_full.stderr.log",
     )
 
     combined = "\n".join(p for p in (result.stdout, result.stderr) if p)
@@ -1011,8 +1000,7 @@ def prewarm_phunter_apk_cache(
         "status": status,
         "cmd": result.cmd,
         "returncode": result.returncode,
-        "target_classes": normalized_target_classes,
-        "scope_label": scope_label,
+        "scope_label": "full",
         "raw_stdout": result.stdout,
         "raw_stderr": result.stderr,
     }

@@ -125,43 +125,16 @@ class AndroidVulnScanner:
         if deduped > 0:
             print(f"    -> 任务去重: {raw_task_count} -> {total_vulns}（合并 {deduped} 个重复项）")
 
-        scope_groups: dict[tuple[str, ...], list[str]] = {}
-        for lib, _, _ in tasks:
-            scope_key = tuple(lib.target_classes or [])
-            scope_groups.setdefault(scope_key, []).append(lib.normalized_name)
-
-        print(
-            f"    -> 单进程预热 APK Soot 缓存（threadNum=1），"
-            f"scope={len(scope_groups)} ..."
-        )
-        prewarm_summary = {"success": 0, "failed": 0, "skipped": 0}
-        for index, scope_key in enumerate(scope_groups, start=1):
-            scope_classes = list(scope_key)
-            scope_desc = "full APK" if not scope_classes else f"{len(scope_classes)} classes"
-            print(
-                f"    -> APK Soot scope 预热 {index}/{len(scope_groups)}: {scope_desc}"
-            )
-            prewarm_result = prewarm_phunter_apk_cache(
-                self.context.path,
-                target_classes=scope_classes,
-            )
-            prewarm_status = prewarm_result.get("status", "failed")
-            prewarm_summary[prewarm_status if prewarm_status in prewarm_summary else "failed"] += 1
-            if prewarm_status == "success":
-                continue
+        print("    -> 单进程预热 APK 全量 Soot 缓存（threadNum=1）...")
+        prewarm_result = prewarm_phunter_apk_cache(self.context.path)
+        prewarm_status = prewarm_result.get("status", "failed")
+        if prewarm_status != "success":
             logger.warning(
-                "PHunter APK prewarm failed for APK %s scope %s: %s",
+                "PHunter full APK prewarm failed for APK %s: %s",
                 self.context.name,
-                prewarm_result.get("scope_label"),
                 prewarm_result.get("reason") or prewarm_result.get("returncode"),
             )
-
-        print(
-            "    -> APK Soot 缓存预热完成: "
-            f"success={prewarm_summary['success']}, "
-            f"failed={prewarm_summary['failed']}, "
-            f"skipped={prewarm_summary['skipped']}。"
-        )
+        print(f"    -> APK 全量 Soot 缓存预热完成: status={prewarm_status}.")
 
         print(
             f"    -> 命中 {total_vulns} 个疑似漏洞记录，"
