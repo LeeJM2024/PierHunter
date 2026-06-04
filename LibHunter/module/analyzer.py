@@ -5,7 +5,6 @@ import logging
 import multiprocessing
 import os
 import pickle
-import random
 import re
 import sys
 import time
@@ -50,6 +49,16 @@ HEAVY_BUCKET_PRIORITY = (
     "org.jetbrains.kotlin.kotlin-stdlib",
     "com.fasterxml.jackson.core.jackson-databind",
 )
+
+HIGH_RISK_FULL_SCAN_FAMILIES = {
+    "androidx.room.room-runtime",
+    "com.squareup.okhttp3.okhttp",
+    "io.reactivex.rxjava",
+    "org.apache.commons.commons-compress",
+    "org.apache.commons.commons-io",
+    "org.apache.commons.commons-lang3",
+    "org.apache.commons.commons-text",
+}
 
 MODULE_SCOPE_LABELS = {
     "collections_iterators_functors",
@@ -2135,23 +2144,17 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
         logger=LOGGER,
     )
     libs_list = [lib for versions in lib_groups.values() for lib in versions]
-    libs = list(libs_list)
-    random.shuffle(libs)
-
-    should_prebuild_all_versions = not skeleton_pickles or len(to_analysze_apks) == 0
-    decompile_thread_num = min(thread_num, len(libs)) if len(libs) > 0 else 1
-    if len(libs) > 0 and should_prebuild_all_versions:
-        tasks = [(lib_dex_folder, lib) for lib in libs]
-        try:
-            with Pool(processes=decompile_thread_num, initializer=init_worker) as pool:
-                for _ in pool.imap_unordered(_build_lib_pickle_task, tasks):
-                    pass
-        except (PermissionError, OSError, RuntimeError) as e:
-            LOGGER.warning("Pool init failed in prebuild stage, fallback to serial mode: %s", e)
-            for task in tasks:
-                _build_lib_pickle_task(task)
-    elif len(libs) > 0:
-        LOGGER.info("[libhunter] skeleton mode enabled; version pickles load on demand in stage2")
+    stage1_skeleton_pickles = {
+        family: entries
+        for family, entries in skeleton_pickles.items()
+        if family not in HIGH_RISK_FULL_SCAN_FAMILIES
+    }
+    LOGGER.info(
+        "[libhunter] high-risk full-scan families=%d versions=%d",
+        len(HIGH_RISK_FULL_SCAN_FAMILIES),
+        sum(len(version_index.get(family, [])) for family in HIGH_RISK_FULL_SCAN_FAMILIES),
+    )
+    LOGGER.info("[libhunter] version pickles load on demand in stage2")
 
     print("All TPL information extracted ...")
     time_end = datetime.datetime.now()
@@ -2165,8 +2168,8 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
     LOGGER.info(
         "[libhunter] version families=%d skeleton families=%d skeleton pickles=%d bucket families=%d",
         len(version_index),
-        len(skeleton_pickles),
-        sum(len(entries) for entries in skeleton_pickles.values()),
+        len(stage1_skeleton_pickles),
+        sum(len(entries) for entries in stage1_skeleton_pickles.values()),
         len(bucket_pickles),
     )
 
@@ -2187,10 +2190,43 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
 
         candidate_versions: List[dict] = []
         candidate_families: List[str] = []
-        if skeleton_pickles:
+        seen_versions: Set[tuple[str, str]] = set()
+
+        def _add_candidate_version(version_entry: dict) -> None:
+            key = (
+                str(version_entry.get("family", "")).strip(),
+                str(version_entry.get("version", "")).strip(),
+            )
+            if key in seen_versions:
+                return
+            seen_versions.add(key)
+            candidate_versions.append(version_entry)
+
+        high_risk_versions_added = 0
+        for family in sorted(HIGH_RISK_FULL_SCAN_FAMILIES):
+            before_count = len(candidate_versions)
+            for version_entry in version_index.get(family, []):
+                _add_candidate_version(version_entry)
+            added = len(candidate_versions) - before_count
+            high_risk_versions_added += added
+            if added:
+                LOGGER.info(
+                    "[libhunter] %s high-risk full scan family=%s versions=%d",
+                    apk,
+                    family,
+                    added,
+                )
+        if high_risk_versions_added:
+            LOGGER.info(
+                "[libhunter] %s high-risk full scan versions added=%d",
+                apk,
+                high_risk_versions_added,
+            )
+
+        if stage1_skeleton_pickles:
             skeleton_details, bucket_details, pipeline_stats = _run_stage1_bucket_pipeline(
                 apk_pickle_path=apk_pickle_path,
-                skeletons=skeleton_pickles,
+                skeletons=stage1_skeleton_pickles,
                 buckets=bucket_pickles,
                 thread_num=thread_num,
                 apk_label=apk,
@@ -2200,23 +2236,24 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
             LOGGER.info(
                 "[libhunter] %s stage1_skeletons=%d candidate_families=%d stage1_time=%ss pipeline_time=%ss",
                 apk,
-                sum(len(entries) for entries in skeleton_pickles.values()),
+                sum(len(entries) for entries in stage1_skeleton_pickles.values()),
                 len(candidate_families),
                 pipeline_stats.get("stage1_time", 0),
                 pipeline_stats.get("pipeline_time", 0),
             )
             if not candidate_families:
-                LOGGER.info("[libhunter] %s no stage1 candidates; skip stage2 version scan", apk)
-                apk_time_end = datetime.datetime.now()
-                apk_time = (apk_time_end - apk_time_start).seconds
-                _write_libhunter_reports(
-                    output_folder=output_folder,
-                    apk_name=apk,
-                    detections=[],
-                    apk_time_seconds=apk_time,
-                )
-                LOGGER.info("Current apk analysis time: %d (in seconds)", apk_time)
-                continue
+                LOGGER.info("[libhunter] %s no stage1 candidates outside high-risk families", apk)
+                if not candidate_versions:
+                    apk_time_end = datetime.datetime.now()
+                    apk_time = (apk_time_end - apk_time_start).seconds
+                    _write_libhunter_reports(
+                        output_folder=output_folder,
+                        apk_name=apk,
+                        detections=[],
+                        apk_time_seconds=apk_time,
+                    )
+                    LOGGER.info("Current apk analysis time: %d (in seconds)", apk_time)
+                    continue
 
             candidate_scopes = _extract_candidate_scopes(skeleton_details)
             version_lookup: Dict[str, Dict[str, dict]] = {
@@ -2227,17 +2264,6 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
                 }
                 for family, entries in version_index.items()
             }
-            seen_versions: Set[tuple[str, str]] = set()
-
-            def _add_candidate_version(version_entry: dict) -> None:
-                key = (
-                    str(version_entry.get("family", "")).strip(),
-                    str(version_entry.get("version", "")).strip(),
-                )
-                if key in seen_versions:
-                    return
-                seen_versions.add(key)
-                candidate_versions.append(version_entry)
 
             heavy_candidates = [
                 family
@@ -2365,7 +2391,7 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
         LOGGER.info(
             "[libhunter] %s candidate_families=%d candidate_versions=%d detections=%d detect_time=%ss",
             apk,
-            len(candidate_families) if skeleton_pickles else len(version_index),
+            len(candidate_families) if stage1_skeleton_pickles else len(version_index),
             len(candidate_versions),
             len(detections),
             scan_time,
