@@ -9,7 +9,6 @@ PHunter/analyze/MethodAttr.java
 PHunter/analyze/PHunterCacheSupport.java
 PHunter/analyze/Pair.java
 PHunter/analyze/ParsePatchFiles.java
-PHunter/analyze/PatchPresentTest.java
 PHunter/analyze/PatchPresentTest_new.java
 PHunter/analyze/PatchState.java
 PHunter/analyze/PatchSummary.java
@@ -27,8 +26,6 @@ PHunter/similarity/PathSimilarityThread.java
 PHunter/similarity/SimilarityUtil.java
 PHunter/similarity/dp.java
 PHunter/symbolicExec/MethodDigest.java
-PHunter/symbolicExec/MethodDigest_new.java
-PHunter/symbolicExec/MethodDigest_new2.java
 PHunter/symbolicExec/predicateAST.java
 PHunter/treeEditDistance/costmodel/CostModel.java
 PHunter/treeEditDistance/costmodel/NodeType.java

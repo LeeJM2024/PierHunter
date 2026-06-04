@@ -93,8 +93,11 @@ public class MainClass {
 
             if (cmd.hasOption(OPTION_PREWARM_APK_ONLY)) {
                 TimeRecorder.beforeAPK = System.currentTimeMillis();
-                new APKAnalyzer(config);
+                APKAnalyzer apk = new APKAnalyzer(config);
                 TimeRecorder.afterAPK = System.currentTimeMillis();
+                if (!apk.isFullApkCacheReady()) {
+                    throw new IOException("PHunter APK prewarm failed: full APK analysis cache was not stored.");
+                }
                 logger.info("PHunter APK prewarm mode completed. APK cache is ready.");
                 return;
             }

@@ -17,6 +17,7 @@ import java.util.Set;
 public class APKAnalyzer extends Analyzer {
     private final Configuration config;
     private final Logger logger = LoggerFactory.getLogger(getClass());
+    private boolean fullApkCacheReady = false;
 
     public APKAnalyzer(Configuration config) throws IOException {
         super(config);
@@ -35,13 +36,14 @@ public class APKAnalyzer extends Analyzer {
         if (cachedClasses != null) {
             this.allClasses = selectClassesForScope(cachedClasses, targetScope);
             rebuildAllMethodsFromClasses();
+            this.fullApkCacheReady = true;
             return;
         }
 
         SootCallGraph cg = analyze();
         buildCG(cg);
         if (targetScope.isEmpty()) {
-            PHunterCacheSupport.storeAnalyzer(
+            this.fullApkCacheReady = PHunterCacheSupport.storeAnalyzer(
                     config,
                     PHunterCacheSupport.DOMAIN_APK_ANALYSIS,
                     inputFile,
@@ -52,6 +54,10 @@ public class APKAnalyzer extends Analyzer {
         } else {
             logger.info("Skip storing scoped APK analysis; build the full APK cache with --prewarmAPKOnly first.");
         }
+    }
+
+    public boolean isFullApkCacheReady() {
+        return fullApkCacheReady;
     }
 
     private void initializeSoot() {

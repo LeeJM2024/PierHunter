@@ -306,13 +306,11 @@ public class PatchSummary {
                         .stream()
                         .filter(unit -> preAffectedLines.contains(unit.getJavaSourceStartLineNumber()))
                         .collect(Collectors.toList());
-//                MethodDigest_new preMd = new MethodDigest_new(preMethod.body, prePatchRelatedUnits); // a corresponding method in pre
 
                 List<Unit> postPatchRelatedUnits = postMethod.body.getUnits()
                         .stream()
                         .filter(unit -> postAffectedLines.contains(unit.getJavaSourceStartLineNumber()))
                         .collect(Collectors.toList());
-//                MethodDigest_new postMd = new MethodDigest_new(postMethod.body, postPatchRelatedUnits); // a modified method in post
 
             }
         }

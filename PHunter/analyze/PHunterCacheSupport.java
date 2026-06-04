@@ -98,7 +98,7 @@ public final class PHunterCacheSupport {
         }
     }
 
-    public static void storeAnalyzer(
+    public static boolean storeAnalyzer(
             Configuration config,
             String domain,
             File sourceFile,
@@ -107,10 +107,10 @@ public final class PHunterCacheSupport {
             Logger logger
     ) {
         if (!isCacheEnabled(config) || sourceFile == null || !sourceFile.exists() || allClasses == null) {
-            return;
+            return false;
         }
         try {
-            prepareAnalyzerForSerialization(allClasses);
+            prepareAnalyzerForSerialization(allClasses, logger);
             List<String> normalizedScope = normalizeAnalyzerScope(domain, scopeClasses);
             String sourceHash = buildContentHash(sourceFile);
             String scopeHash = computeScopeHash(normalizedScope);
@@ -122,8 +122,10 @@ public final class PHunterCacheSupport {
                 updateAlias(config, domain, sourceFile, normalizedScope, key, logger);
             }
             logger.info("Cache stored [{}] key={}", domain, key);
+            return true;
         } catch (Exception ex) {
-            logger.warn("Failed to store cache [{}] for {}: {}", domain, sourceFile.getAbsolutePath(), ex.toString());
+            logger.warn("Failed to store cache [{}] for {}", domain, sourceFile.getAbsolutePath(), ex);
+            return false;
         }
     }
 
@@ -482,9 +484,10 @@ public final class PHunterCacheSupport {
         return sb.toString();
     }
 
-    private static void prepareAnalyzerForSerialization(Map<String, ClassAttr> allClasses) {
+    private static void prepareAnalyzerForSerialization(Map<String, ClassAttr> allClasses, Logger logger) {
         ensureDigestScriptEngines();
         Set<MethodAttr> visitedMethods = new LinkedHashSet<>();
+        int skippedDigests = 0;
         for (ClassAttr clazz : allClasses.values()) {
             if (clazz == null || clazz.methods == null) {
                 continue;
@@ -493,13 +496,25 @@ public final class PHunterCacheSupport {
                 if (method == null || !visitedMethods.add(method)) {
                     continue;
                 }
-                if (method.hasBody && method.digest == null && method.body != null) {
-                    method.digest = new MethodDigest(method.body, null);
-                }
-                if (method.digest != null) {
-                    method.digest.prepareForSerialization();
+                try {
+                    if (method.hasBody && method.digest == null && method.body != null) {
+                        method.digest = new MethodDigest(method.body, null);
+                    }
+                    if (method.digest != null) {
+                        method.digest.prepareForSerialization();
+                    }
+                } catch (RuntimeException ex) {
+                    method.digest = null;
+                    skippedDigests += 1;
+                    if (skippedDigests <= 20) {
+                        String signature = method.signature == null ? "<unknown>" : method.signature;
+                        logger.warn("Skip unserializable method digest while preparing APK cache: {} ({})", signature, ex.toString());
+                    }
                 }
             }
+        }
+        if (skippedDigests > 0) {
+            logger.warn("Skipped {} method digest(s) while preparing analyzer cache; structural class/method cache will still be stored.", skippedDigests);
         }
     }
 

@@ -90,12 +90,13 @@ TPL-CVEs/
 
 # PHunter generated or vendored-heavy artifacts
 PHunter/android-31/
+PHunter/build/classes/
+!PHunter/build/sources.list
 PHunter/lib/
 PHunter/META-INF/
 PHunter/real-sample/
 PHunter/sample/
 PHunter/src/
-PHunter/symbolicExec/
 PHunter/target/
 PHunter/PHunter-old.jar
 
