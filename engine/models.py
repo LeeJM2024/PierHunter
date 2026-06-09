@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 @dataclass
@@ -16,6 +16,7 @@ class Vulnerability:
     patch_status: str = "UNTESTED"
     pre_similarity: Optional[float] = None
     post_similarity: Optional[float] = None
+    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -27,6 +28,7 @@ class TPLibrary:
     version: str
     similarity: float
     target_classes: List[str] = field(default_factory=list)
+    evidence: dict[str, Any] = field(default_factory=dict)
 
     vulnerabilities: List[Vulnerability] = field(default_factory=list)
 

@@ -1,4 +1,4 @@
-import type { PatchStatusRaw } from "./contracts";
+import type { AnalysisArtifactsRaw, ApkStaticProfileRaw, PatchStatusRaw, ScanEstimateRaw } from "./contracts";
 
 export type TaskStage = "IDLE" | "UPLOADING" | "QUEUED" | "SCANNING" | "REPORT_READY" | "FAILED";
 
@@ -52,6 +52,8 @@ export interface UsedLibraryModel {
   artifact: string;
   version: string;
   confidence: number;
+  targetClasses: string[];
+  evidence: Record<string, unknown>;
   vulnerabilityCount: number;
   maxSeverity: SeverityLevel;
 }
@@ -63,6 +65,7 @@ export interface VulnerabilityModel {
   status: PatchStatusSemantic;
   preSimilarity: number | null;
   postSimilarity: number | null;
+  evidence: Record<string, unknown>;
   raw: {
     status: PatchStatusRaw;
     pre_similarity: number | null;
@@ -86,6 +89,7 @@ export interface ReportModel {
   usedLibraries: UsedLibraryModel[];
   vulnerabilities: VulnerabilityModel[];
   summary: ReportSummary;
+  analysisArtifacts: AnalysisArtifactsRaw | null;
 }
 
 export interface LogEntry {
@@ -99,4 +103,6 @@ export interface UploadContext {
   fileName: string;
   size: number;
   uploadedPath?: string;
+  apkProfile?: ApkStaticProfileRaw;
+  scanEstimate?: ScanEstimateRaw;
 }

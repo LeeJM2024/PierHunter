@@ -28,6 +28,7 @@ class CommandResult:
     stdout: str
     stderr: str
     hung: bool = False          # 【新增】True 表示心跳超时被强制 kill
+    timed_out: bool = False
 
 
 # ── 【新增】内存限制辅助函数（仅 Linux）────────────────────────
@@ -93,6 +94,7 @@ def run_command(
     # 【新增】共享的"最后活跃时间戳"，由 reader 线程负责刷新
     last_activity: List[float] = [time.monotonic()]
     hung_flag: List[bool] = [False]
+    timed_out_flag: List[bool] = [False]
 
     def _reader(
         pipe,
@@ -171,14 +173,11 @@ def run_command(
         watcher.join(timeout=2)
 
     except subprocess.TimeoutExpired:
+        timed_out_flag[0] = True
         proc.kill()
         proc.wait()
-        raise CommandExecutionError(
-            f"Command timed out after {timeout}s: {' '.join(cmd)}",
-            returncode=-1,
-            stdout="\n".join(stdout_lines),
-            stderr="\n".join(stderr_lines),
-        )
+        t_out.join(timeout=2)
+        t_err.join(timeout=2)
     except FileNotFoundError as exc:
         raise CommandExecutionError(
             f"Executable not found: {cmd[0]}",
@@ -193,6 +192,7 @@ def run_command(
         stdout="\n".join(stdout_lines),
         stderr="\n".join(stderr_lines),
         hung=hung_flag[0],           # 【新增】
+        timed_out=timed_out_flag[0],
     )
 
     if raise_on_error and result.returncode != 0 and not result.hung:

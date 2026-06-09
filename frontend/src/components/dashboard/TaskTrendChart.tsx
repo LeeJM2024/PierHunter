@@ -1,9 +1,27 @@
-import { LineChart, TrendingUp, TrendingDown, Calendar, Zap } from "lucide-react";
-import { mockTaskTrendData, mockTotalTasks, mockTotalCompleted, mockTotalFailed, mockSuccessRate } from "./mockData";
+import { Calendar, LineChart, TrendingDown, TrendingUp, Zap } from "lucide-react";
 
-export function TaskTrendChart(): JSX.Element {
-  const totalScanning = mockTaskTrendData.reduce((sum, day) => sum + day.scanning, 0);
-  
+import { mockSuccessRate, mockTaskTrendData } from "./mockData";
+import type { DashboardSummaryRaw } from "../../types/contracts";
+
+interface TrendPoint {
+  day: string;
+  completed: number;
+  failed: number;
+  scanning: number;
+  queued: number;
+  total: number;
+}
+
+export function TaskTrendChart({ summary }: { summary: DashboardSummaryRaw | null }): JSX.Element {
+  const hasRealTrend = Boolean(summary && summary.trend.length > 0 && summary.task_stats.total_tasks > 0);
+  const trendData: TrendPoint[] = hasRealTrend ? summary!.trend : mockTaskTrendData;
+  const totalScanning = trendData.reduce((sum, day) => sum + day.scanning, 0);
+  const totalQueued = trendData.reduce((sum, day) => sum + day.queued, 0);
+  const totalTasks = trendData.reduce((sum, day) => sum + day.total, 0);
+  const totalCompleted = trendData.reduce((sum, day) => sum + day.completed, 0);
+  const totalFailed = trendData.reduce((sum, day) => sum + day.failed, 0);
+  const successRate = hasRealTrend ? summary!.task_stats.success_rate : mockSuccessRate;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -13,31 +31,28 @@ export function TaskTrendChart(): JSX.Element {
         </div>
         <div className="flex items-center gap-2 text-xs">
           <Zap className="h-3 w-3 text-amber-500" />
-          <span className="text-amber-400 font-medium">答辩模式</span>
+          <span className="font-medium text-amber-400">{hasRealTrend ? "真实聚合" : "示例数据"}</span>
           <Calendar className="h-3 w-3 text-slate-500" />
-          <span className="text-slate-400">最近7天</span>
+          <span className="text-slate-400">最近 7 天</span>
         </div>
       </div>
-      
+
       <div className="space-y-3">
-        {mockTaskTrendData.map((dayData, index) => (
-          <div key={index} className="flex items-center justify-between group hover:bg-slate-800/20 p-2 rounded-lg transition-colors">
-            <span className="text-xs text-slate-400 w-12">{dayData.day}</span>
-            <div className="flex-1 flex items-center gap-1">
-              {/* 完成的任务 - 大量绿色圆点 */}
-              {Array.from({ length: Math.min(Math.floor(dayData.completed / 5), 15) }).map((_, i) => (
-                <div key={`completed-${i}`} className="h-2 w-2 rounded-full bg-emerald-500/80 group-hover:bg-emerald-500 transition-colors"></div>
+        {trendData.map((dayData) => (
+          <div key={dayData.day} className="flex items-center justify-between rounded-lg p-2 transition-colors hover:bg-slate-800/20">
+            <span className="w-14 text-xs text-slate-400">{dayData.day}</span>
+            <div className="flex flex-1 items-center gap-1">
+              {Array.from({ length: Math.min(Math.ceil(dayData.completed / 8), 16) }).map((_, i) => (
+                <div key={`completed-${i}`} className="h-2 w-2 rounded-full bg-emerald-500/80" />
               ))}
-              {dayData.completed > 75 && (
-                <span className="text-xs text-emerald-400 font-medium">+{dayData.completed - 75}</span>
-              )}
-              {/* 失败的任务 - 少量红色圆点 */}
-              {Array.from({ length: Math.min(dayData.failed, 3) }).map((_, i) => (
-                <div key={`failed-${i}`} className="h-2 w-2 rounded-full bg-rose-500/80 group-hover:bg-rose-500 transition-colors"></div>
+              {Array.from({ length: Math.min(dayData.failed, 4) }).map((_, i) => (
+                <div key={`failed-${i}`} className="h-2 w-2 rounded-full bg-rose-500/80" />
               ))}
-              {/* 扫描中的任务 - 闪烁的黄色圆点 */}
-              {Array.from({ length: Math.min(dayData.scanning, 5) }).map((_, i) => (
-                <div key={`scanning-${i}`} className="h-2 w-2 rounded-full bg-amber-500/80 animate-pulse group-hover:bg-amber-500 transition-colors"></div>
+              {Array.from({ length: Math.min(dayData.scanning, 6) }).map((_, i) => (
+                <div key={`scanning-${i}`} className="h-2 w-2 animate-pulse rounded-full bg-amber-500/80" />
+              ))}
+              {Array.from({ length: Math.min(dayData.queued, 4) }).map((_, i) => (
+                <div key={`queued-${i}`} className="h-2 w-2 rounded-full bg-cyan-500/70" />
               ))}
             </div>
             <div className="text-right">
@@ -47,44 +62,41 @@ export function TaskTrendChart(): JSX.Element {
           </div>
         ))}
       </div>
-      
+
       <div className="rounded-lg border border-slate-700/40 bg-slate-800/30 p-3">
-        <div className="grid grid-cols-3 gap-3 mb-2">
-          <div className="text-center">
-            <div className="text-lg font-bold text-emerald-500">{mockTotalCompleted}</div>
-            <div className="text-xs text-slate-400">完成</div>
-          </div>
-          <div className="text-center">
-            <div className="text-lg font-bold text-rose-500">{mockTotalFailed}</div>
-            <div className="text-xs text-slate-400">失败</div>
-          </div>
-          <div className="text-center">
-            <div className="text-lg font-bold text-amber-500">{totalScanning}</div>
-            <div className="text-xs text-slate-400">进行中</div>
-          </div>
+        <div className="mb-2 grid grid-cols-4 gap-3">
+          <Metric label="完成" value={totalCompleted} className="text-emerald-500" />
+          <Metric label="失败" value={totalFailed} className="text-rose-500" />
+          <Metric label="进行中" value={totalScanning} className="text-amber-500" />
+          <Metric label="排队" value={totalQueued} className="text-cyan-500" />
         </div>
-        
-        <div className="flex items-center justify-between pt-2 border-t border-slate-700/40">
+
+        <div className="flex items-center justify-between border-t border-slate-700/40 pt-2">
           <div className="text-xs text-slate-400">
-            总计 <span className="text-slate-300 font-medium">{mockTotalTasks}</span> 任务
+            总计 <span className="font-medium text-slate-300">{totalTasks}</span> 任务
           </div>
           <div className="flex items-center gap-2">
-            <div className="text-xs text-slate-400">成功率</div>
-            <div className={`text-sm font-bold ${mockSuccessRate >= 95 ? 'text-emerald-500' : 'text-amber-500'}`}>
-              {mockSuccessRate}%
-            </div>
-            {mockSuccessRate >= 95 ? (
-              <TrendingUp className="h-3 w-3 text-emerald-500" />
-            ) : (
-              <TrendingDown className="h-3 w-3 text-amber-500" />
-            )}
+            <span className="text-xs text-slate-400">成功率</span>
+            <span className={`text-sm font-bold ${successRate >= 95 ? "text-emerald-500" : "text-amber-500"}`}>
+              {successRate}%
+            </span>
+            {successRate >= 95 ? <TrendingUp className="h-3 w-3 text-emerald-500" /> : <TrendingDown className="h-3 w-3 text-amber-500" />}
           </div>
         </div>
       </div>
-      
-      <div className="text-xs text-slate-500 text-center">
-        📈 数据每5分钟自动更新 • 峰值并发 48 任务 • 平均扫描时间 2分34秒
+
+      <div className="text-center text-xs text-slate-500">
+        来源：{hasRealTrend ? "后端任务数据库与已保存报告" : "示例数据，等待真实任务沉淀"}
       </div>
+    </div>
+  );
+}
+
+function Metric({ label, value, className }: { label: string; value: number; className: string }): JSX.Element {
+  return (
+    <div className="text-center">
+      <div className={`text-lg font-bold ${className}`}>{value}</div>
+      <div className="text-xs text-slate-400">{label}</div>
     </div>
   );
 }

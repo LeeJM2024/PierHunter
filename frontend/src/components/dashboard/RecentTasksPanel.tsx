@@ -1,11 +1,39 @@
-import { Clock3, FileScan, PlayCircle } from "lucide-react";
+import { Clock3, FileScan, Loader2, PlayCircle, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Panel } from "../common/Panel";
 
-export function RecentTasksPanel({ historyTaskIds }: { historyTaskIds: string[] }): JSX.Element {
+export function RecentTasksPanel({ historyTaskIds, onClear }: { historyTaskIds: string[]; onClear: () => Promise<void> }): JSX.Element {
+  const [isClearing, setIsClearing] = useState(false);
+
+  const handleClear = async () => {
+    if (isClearing) return;
+    setIsClearing(true);
+    try {
+      await onClear();
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const right = historyTaskIds.length ? (
+    <button
+      type="button"
+      onClick={() => void handleClear()}
+      disabled={isClearing}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-600/60 bg-slate-800/40 text-slate-300 transition hover:border-rose-400/50 hover:bg-rose-500/10 hover:text-rose-200"
+      title="清除历史记录"
+      aria-label="清除历史记录"
+    >
+      {isClearing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+    </button>
+  ) : (
+    <Clock3 className="h-4 w-4 text-slate-300" />
+  );
+
   return (
-    <Panel title="历史任务" right={<Clock3 className="h-4 w-4 text-slate-300" />}>
+    <Panel title="历史任务" right={right}>
       {historyTaskIds.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-600/70 bg-slate-950/45 px-4 py-5 text-sm text-slate-400">
           暂无历史任务

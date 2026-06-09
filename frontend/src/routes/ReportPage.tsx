@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { Panel } from "../components/common/Panel";
 import { ErrorView, LoadingView } from "../components/common/StateView";
+import { AnalysisTracePanel } from "../components/report/AnalysisTracePanel";
 import { CopilotPanel } from "../components/report/CopilotPanel";
 import { EvidencePanel } from "../components/report/EvidencePanel";
 import { LibrariesTable } from "../components/report/LibrariesTable";
@@ -87,6 +88,11 @@ export function ReportPage(): JSX.Element {
     <div className="space-y-6">
       <ReportSummaryCards report={report} />
 
+      <div className="grid gap-6 xl:grid-cols-[0.36fr_0.64fr]">
+        <AnalysisTracePanel artifacts={report.analysisArtifacts} />
+        <CopilotPanel vulnerability={activeVulnerability} report={report} />
+      </div>
+
       <Panel title="APK 基础信息" right={<FlaskConical className="h-4 w-4 text-cyan-300" />}>
         <div className="grid gap-3 text-sm md:grid-cols-3">
           <div className="rounded-lg border border-slate-700/70 bg-slate-950/60 px-3 py-2">
@@ -144,7 +150,6 @@ export function ReportPage(): JSX.Element {
 
         <div className="space-y-4">
           <EvidencePanel vulnerability={activeVulnerability} />
-          <CopilotPanel vulnerability={activeVulnerability} report={report} />
         </div>
       </div>
     </div>

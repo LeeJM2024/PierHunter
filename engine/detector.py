@@ -30,6 +30,9 @@ from config import (
     PHUNTER_DIR,
     PHUNTER_JAR,
     PHUNTER_CACHE_DIR,
+    PHUNTER_APK_PREWARM_TIMEOUT,
+    PHUNTER_HEARTBEAT_TIMEOUT,
+    PHUNTER_TIMEOUT,
     PICKLE_CACHE_DIR,
     PYTHON_BIN,
     RAW_DIR,
@@ -68,7 +71,17 @@ _POST_SIMILARITY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _PHUNTER_RESOURCE_LIMIT_PATTERN = re.compile(
-    r"(pthread_create\s+failed|unable\s+to\s+create\s+native\s+thread|EAGAIN|process/resource\s+limits\s+reached)",
+    r"("
+    r"pthread_create\s+failed|"
+    r"unable\s+to\s+create\s+native\s+thread|"
+    r"EAGAIN|"
+    r"process/resource\s+limits\s+reached|"
+    r"OutOfMemoryError|"
+    r"Java\s+heap\s+space|"
+    r"GC\s+overhead\s+limit\s+exceeded|"
+    r"heartbeat\s+timeout|"
+    r"timed\s+out"
+    r")",
     re.IGNORECASE,
 )   
 _PHUNTER_FATAL_PATTERN = re.compile(
@@ -484,6 +497,8 @@ def run_libhunter(apk_path: str | Path) -> dict:
 
     env = os.environ.copy()
     env["PYTHONPATH"] = build_pythonpath()
+    # TEST-ONLY: lets LibHunter write temporary template timing files beside run logs.
+    env["LOG_DIR"] = str(LOG_DIR)
     env["LH_PICKLE_DIR"] = str(PICKLE_CACHE_DIR)
     env["LH_APK_PICKLE_DIR"] = str(APK_PICKLE_CACHE_DIR)
     env["LH_SKELETON_PICKLE_DIR"] = str(SKELETON_PICKLE_CACHE_DIR)
@@ -654,6 +669,15 @@ def _parse_patch_status(text: str) -> str:
 
 def _is_phunter_resource_limit(text: str) -> bool:
     return bool(_PHUNTER_RESOURCE_LIMIT_PATTERN.search(text or ""))
+
+
+def _phunter_combined_output(result: CommandResult) -> str:
+    parts = [p for p in (result.stdout, result.stderr) if p]
+    if result.hung:
+        parts.append("heartbeat timeout")
+    if getattr(result, "timed_out", False):
+        parts.append("timed out")
+    return "\n".join(parts)
 
 
 def build_phunter_cmd(
@@ -968,7 +992,7 @@ def prewarm_phunter_apk_cache(
             "returncode": None,
         }
 
-    java_opts_raw = os.getenv("PHUNTER_APK_PREWARM_JAVA_OPTS", "-XX:ActiveProcessorCount=1")
+    java_opts_raw = os.getenv("PHUNTER_APK_PREWARM_JAVA_OPTS", "-Xmx4g -XX:ActiveProcessorCount=1")
     java_opts = shlex.split(java_opts_raw)
     phunter_env = dict(os.environ)
     phunter_env["PHUNTER_CACHE_DIR"] = str(PHUNTER_CACHE_DIR)
@@ -982,17 +1006,19 @@ def prewarm_phunter_apk_cache(
     result = run_logged_command(
         cmd,
         cwd=PHUNTER_DIR,
-        timeout=None,
+        timeout=PHUNTER_APK_PREWARM_TIMEOUT,
         env=phunter_env,
         stream_output=True,
-        heartbeat_timeout=0,
+        heartbeat_timeout=PHUNTER_HEARTBEAT_TIMEOUT,
         stdout_log=LOG_DIR / f"phunter_prewarm_apk_{apk.stem}_full.stdout.log",
         stderr_log=LOG_DIR / f"phunter_prewarm_apk_{apk.stem}_full.stderr.log",
     )
 
-    combined = "\n".join(p for p in (result.stdout, result.stderr) if p)
-    if result.returncode == 0 and not _has_phunter_fatal(combined):
+    combined = _phunter_combined_output(result)
+    if result.returncode == 0 and not result.hung and not getattr(result, "timed_out", False) and not _has_phunter_fatal(combined):
         status = "success"
+    elif result.hung or getattr(result, "timed_out", False) or _is_phunter_resource_limit(combined):
+        status = "resource_limited"
     else:
         status = "failed"
 
@@ -1001,6 +1027,9 @@ def prewarm_phunter_apk_cache(
         "cmd": result.cmd,
         "returncode": result.returncode,
         "scope_label": "full",
+        "java_opts": java_opts_raw,
+        "hung": result.hung,
+        "timed_out": getattr(result, "timed_out", False),
         "raw_stdout": result.stdout,
         "raw_stderr": result.stderr,
     }
@@ -1028,7 +1057,8 @@ def run_phunter(
     cve_id = cve_meta["cve_id"]
     thread_num = int(cve_meta.get("thread_num", DEFAULT_PHUNTER_THREADS))
     normalized_target_classes = _normalize_target_classes(target_classes)
-    java_opts = shlex.split(os.getenv("PHUNTER_JAVA_OPTS", ""))
+    java_opts_raw = os.getenv("PHUNTER_JAVA_OPTS", "-Xmx3g -XX:ActiveProcessorCount=2")
+    java_opts = shlex.split(java_opts_raw)
     phunter_env = dict(os.environ)
     phunter_env["PHUNTER_CACHE_DIR"] = str(PHUNTER_CACHE_DIR)
 
@@ -1045,15 +1075,15 @@ def run_phunter(
     result = run_logged_command(
         cmd,
         cwd=PHUNTER_DIR,
-        timeout=None,
+        timeout=PHUNTER_TIMEOUT,
         env=phunter_env,
         stream_output=True,
-        heartbeat_timeout=0,
+        heartbeat_timeout=PHUNTER_HEARTBEAT_TIMEOUT,
         stdout_log=LOG_DIR / f"phunter_{apk_path.stem}_{cve_id}.stdout.log",
         stderr_log=LOG_DIR / f"phunter_{apk_path.stem}_{cve_id}.stderr.log",
     )
 
-    combined = "\n".join(p for p in (result.stdout, result.stderr) if p)
+    combined = _phunter_combined_output(result)
     retried = False
     # 资源不足时触发重试
     if result.returncode != 0 and _is_phunter_resource_limit(combined):
@@ -1063,7 +1093,7 @@ def run_phunter(
         # 读取重试专用 JVM 参数
         retry_java_opts_raw = os.getenv(
             "PHUNTER_JAVA_RETRY_OPTS",  
-            "-Xss256k -XX:ActiveProcessorCount=2", # -Xss256k：减小线程栈大小
+            "-Xmx4g -Xss256k -XX:ActiveProcessorCount=1", # -Xss256k：减小线程栈大小
             # -XX:ActiveProcessorCount=2：告诉 JVM 活跃处理器数按 2 处理
         )
         retry_java_opts = shlex.split(retry_java_opts_raw)
@@ -1079,15 +1109,15 @@ def run_phunter(
         retry_result = run_logged_command(
             retry_cmd,
             cwd=PHUNTER_DIR,
-            timeout=None,
+            timeout=PHUNTER_TIMEOUT,
             env=phunter_env,
             stream_output=True,
-            heartbeat_timeout=0,
+            heartbeat_timeout=PHUNTER_HEARTBEAT_TIMEOUT,
             stdout_log=LOG_DIR / f"phunter_{apk_path.stem}_{cve_id}.retry.stdout.log",
             stderr_log=LOG_DIR / f"phunter_{apk_path.stem}_{cve_id}.retry.stderr.log",
         )
         result = retry_result
-        combined = "\n".join(p for p in (result.stdout, result.stderr) if p)
+        combined = _phunter_combined_output(result)
 
     patch_status = _parse_patch_status(combined)
     patch_related_method_count = _extract_int(_PATCH_METHODS_PATTERN, combined)
@@ -1097,9 +1127,9 @@ def run_phunter(
     if result.returncode == 0 and _has_phunter_fatal(combined):
         status = "failed"
         patch_status = "UNKNOWN"
-    elif result.returncode == 0:
+    elif result.returncode == 0 and not result.hung and not getattr(result, "timed_out", False):
         status = "success"
-    elif _is_phunter_resource_limit(combined):
+    elif result.hung or getattr(result, "timed_out", False) or _is_phunter_resource_limit(combined):
         status = "resource_limited"
         patch_status = "RESOURCE_LIMIT"
     else:
@@ -1115,7 +1145,10 @@ def run_phunter(
         "pre_similarity": pre_similarity,
         "post_similarity": post_similarity,
         "target_classes": normalized_target_classes,
+        "java_opts": java_opts_raw,
         "raw_stdout": result.stdout,
         "raw_stderr": result.stderr,
         "retried": retried,
+        "hung": result.hung,
+        "timed_out": getattr(result, "timed_out", False),
     }

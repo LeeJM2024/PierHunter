@@ -48,6 +48,7 @@ LibHunter/log.txt
 data/*
 !data/
 !data/cve_kb.json
+!data/ecosystem_intel_kb.json
 !data/.gitkeep
 data/apk_pickles_cache/
 data/lib_pickles_cache/

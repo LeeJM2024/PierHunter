@@ -1,13 +1,13 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-import { ApiError, fetchReport, startAnalyze, uploadApk } from "../services/api";
+import { ApiError, clearBackendHistory, fetchReport, fetchTask, startAnalyze, uploadApk } from "../services/api";
 import { adaptReport } from "../services/adapters/reportAdapter";
 import { mapBackendTaskStatusToStage } from "../services/adapters/statusAdapter";
 import { createTaskLogSocket, type TaskLogSocketController } from "../services/socket";
 import type { LogEntry, ReportModel, RequestState, TaskStage, UploadContext, WsConnectionState } from "../types/domain";
 import { nowId } from "../utils/identity";
-import { loadLastTask, saveLastTask } from "../utils/storage";
+import { clearLastTask, loadLastTask, saveLastTask } from "../utils/storage";
 
 let activeSocket: TaskLogSocketController | null = null;
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
@@ -15,6 +15,7 @@ let pollingTimer: ReturnType<typeof setInterval> | null = null;
 const POLL_INTERVAL_MS = 4000;
 const MAX_POLL_ROUNDS = 45;
 const MAX_LOGS = 800;
+const USER_VISIBLE_ERROR = "任务处理异常，请重新扫描或稍后查看报告。";
 
 function appendLogEntry(logs: LogEntry[], entry: Omit<LogEntry, "id" | "timestamp">): LogEntry[] {
   const next = [...logs, { id: nowId("log"), timestamp: Date.now(), ...entry }];
@@ -44,6 +45,7 @@ interface TaskStoreState {
   selectedLibraryId: string | null;
 
   resetForNewTask: () => void;
+  clearTaskHistory: () => Promise<void>;
   appendSystemLog: (message: string, source?: LogEntry["source"]) => void;
   uploadAndAnalyze: (file: File) => Promise<string>;
   ensureReport: (taskId: string, silent?: boolean) => Promise<ReportModel | null>;
@@ -115,6 +117,35 @@ export const useTaskStore = create<TaskStoreState>()(
         }));
       },
 
+      clearTaskHistory: async () => {
+        try {
+          await clearBackendHistory();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "历史记录清理失败";
+          set((state) => ({
+            ...state,
+            errorMessage: USER_VISIBLE_ERROR,
+            logs: appendLogEntry(state.logs, {
+              source: "system",
+              message: `[error] ${message}`,
+            }),
+          }));
+          throw error;
+        }
+
+        clearLastTask();
+        set((state) => ({
+          ...state,
+          currentTaskId: null,
+          lastTaskId: null,
+          reportsByTask: {},
+          historyTaskIds: [],
+          errorMessage: null,
+          activeVulnerabilityId: null,
+          selectedLibraryId: null,
+        }));
+      },
+
       appendSystemLog: (message, source = "system") => {
         set((state) => ({
           logs: appendLogEntry(state.logs, { message, source }),
@@ -144,11 +175,13 @@ export const useTaskStore = create<TaskStoreState>()(
           set((state) => ({
             ...state,
             uploadState: "SUCCESS",
-            uploadContext: {
-              fileName: uploadResult.filename,
-              size: uploadResult.size,
-              uploadedPath: uploadResult.path,
-            },
+	            uploadContext: {
+	              fileName: uploadResult.filename,
+	              size: uploadResult.size,
+	              uploadedPath: uploadResult.path,
+	              apkProfile: uploadResult.apk_profile,
+	              scanEstimate: uploadResult.scan_estimate,
+	            },
             logs: appendLogEntry(state.logs, {
               source: "system",
               message: `[upload] 上传成功: ${uploadResult.filename}`,
@@ -180,7 +213,7 @@ export const useTaskStore = create<TaskStoreState>()(
             ...state,
             uploadState: "ERROR",
             taskStage: "FAILED",
-            errorMessage: message,
+            errorMessage: USER_VISIBLE_ERROR,
             logs: appendLogEntry(state.logs, {
               source: "system",
               message: `[error] ${message}`,
@@ -227,7 +260,7 @@ export const useTaskStore = create<TaskStoreState>()(
           const message = error instanceof Error ? error.message : "报告拉取失败";
           set((state) => ({
             ...state,
-            errorMessage: message,
+            errorMessage: USER_VISIBLE_ERROR,
             taskStage: state.taskStage === "REPORT_READY" ? state.taskStage : "FAILED",
             logs: appendLogEntry(state.logs, {
               source: "system",
@@ -270,6 +303,34 @@ export const useTaskStore = create<TaskStoreState>()(
           return;
         }
 
+        try {
+          const existingTask = await fetchTask(taskId);
+          set((state) => ({
+            ...state,
+            taskStage: mapBackendTaskStatusToStage(existingTask.task.status),
+          }));
+        } catch (error) {
+          if (error instanceof ApiError && error.status === 404) {
+            clearRealtimeResources();
+            clearLastTask();
+            set((state) => ({
+              ...state,
+              currentTaskId: null,
+              lastTaskId: null,
+              taskStage: "FAILED",
+              wsState: "DISCONNECTED",
+              isPollingFallback: false,
+              errorMessage: "任务记录已清理，请重新创建扫描任务。",
+              logs: appendLogEntry(state.logs, {
+                source: "system",
+                message: `[system] 旧任务不存在或已被清理，已停止恢复: ${taskId}`,
+              }),
+            }));
+            return;
+          }
+          throw error;
+        }
+
         activeSocket = createTaskLogSocket(taskId, {
           onOpen: () => {
             set((state) => ({
@@ -305,10 +366,10 @@ export const useTaskStore = create<TaskStoreState>()(
               }),
             }));
           },
-          onError: (message) => {
+          onError: () => {
             set((state) => ({
               ...state,
-              errorMessage: message,
+              errorMessage: null,
             }));
           },
           onGiveUp: () => {
@@ -353,7 +414,7 @@ export const useTaskStore = create<TaskStoreState>()(
               set((state) => ({
                 ...state,
                 taskStage: "FAILED",
-                errorMessage: message.message,
+                errorMessage: USER_VISIBLE_ERROR,
                 logs: appendLogEntry(state.logs, {
                   source: "socket",
                   message: `[error] ${message.message}`,
@@ -381,7 +442,7 @@ export const useTaskStore = create<TaskStoreState>()(
                 set((state) => ({
                   ...state,
                   taskStage: "FAILED",
-                  errorMessage: failMessage,
+                  errorMessage: USER_VISIBLE_ERROR,
                   logs: appendLogEntry(state.logs, {
                     source: "system",
                     message: `[error] ${failMessage}`,
@@ -460,7 +521,7 @@ export const useTaskStore = create<TaskStoreState>()(
               ...state,
               isPollingFallback: false,
               wsState: "FAILED",
-              errorMessage: "轮询超时，报告仍未就绪。",
+              errorMessage: "报告生成时间较长，请稍后查看或重新连接。",
               taskStage: state.taskStage === "REPORT_READY" ? state.taskStage : "FAILED",
               logs: appendLogEntry(state.logs, {
                 source: "system",

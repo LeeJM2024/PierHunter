@@ -1,4 +1,5 @@
 # 执行分析的核心过程
+import csv
 import datetime
 import json
 import logging
@@ -774,6 +775,9 @@ def detect(apk_obj, lib_obj, LOGGER, return_details: bool = False):
     :return: Dictionary to return detection results
     '''
     lib_name = getattr(lib_obj, "lib_name", "")
+    pre_match_s = 0.0
+    coarse_match_s = 0.0
+    fine_match_s = 0.0
     if len(lib_obj.classes_dict) == 0:
         if return_details:
             return {
@@ -783,6 +787,9 @@ def detect(apk_obj, lib_obj, LOGGER, return_details: bool = False):
                 "similarity": 0.0,
                 "target_classes": [],
                 "stage": "empty",
+                "pre_match_s": pre_match_s,
+                "coarse_match_s": coarse_match_s,
+                "fine_match_s": fine_match_s,
             }
         return {}
 
@@ -791,7 +798,10 @@ def detect(apk_obj, lib_obj, LOGGER, return_details: bool = False):
 
     result = {}
 
+    # TEST-ONLY: template-level timing for diagnosing slow APK analyses.
+    pre_match_start = time.perf_counter()
     filter_result = pre_match(apk_obj, lib_obj, LOGGER)
+    pre_match_s = time.perf_counter() - pre_match_start
     pre_match_opcodes = 0
     for lib_class in filter_result:
         # if lib_class not in filter_result[lib_class] and lib_class in apk_obj.classes_dict:
@@ -821,6 +831,9 @@ def detect(apk_obj, lib_obj, LOGGER, return_details: bool = False):
                 "target_classes": [],
                 "stage": "pre_match",
                 "pre_match_rate": float(pre_match_rate),
+                "pre_match_s": pre_match_s,
+                "coarse_match_s": coarse_match_s,
+                "fine_match_s": fine_match_s,
             }
         return {}
 
@@ -829,10 +842,12 @@ def detect(apk_obj, lib_obj, LOGGER, return_details: bool = False):
     # LOGGER.debug("filter_effect: %f", filter_effect)
 
     # Perform coarse-grained matching
+    coarse_match_start = time.perf_counter()
     lib_match_classes, abstract_lib_match_classes, lib_class_match_dict = coarse_match(apk_obj,
                                                                                                        lib_obj,
                                                                                                        filter_result,
                                                                                                        LOGGER)
+    coarse_match_s = time.perf_counter() - coarse_match_start
     for lib_class in lib_class_match_dict:
         if len(lib_class_match_dict[lib_class]) > 1:
 
@@ -880,14 +895,19 @@ def detect(apk_obj, lib_obj, LOGGER, return_details: bool = False):
                 "stage": "coarse_match",
                 "pre_match_rate": float(pre_match_rate),
                 "coarse_match_rate": float(lib_coarse_match_rate),
+                "pre_match_s": pre_match_s,
+                "coarse_match_s": coarse_match_s,
+                "fine_match_s": fine_match_s,
             }
         return {}
 
     # Perform fine-grained matching
+    fine_match_start = time.perf_counter()
     lib_class_match_result = fine_match(apk_obj,
                                         lib_obj,
                                         lib_class_match_dict,
                                         LOGGER)
+    fine_match_s = time.perf_counter() - fine_match_start
     for lib_class in lib_class_match_result:
         LOGGER.debug("Fine-grained: library class %s → application class %s", lib_class, lib_class_match_result[lib_class][0])
     LOGGER.debug("The fine-grained unmatched classes in the library are as follows:")
@@ -930,6 +950,9 @@ def detect(apk_obj, lib_obj, LOGGER, return_details: bool = False):
             "coarse_match_rate": float(lib_coarse_match_rate),
             "final_match_opcodes": int(final_match_opcodes),
             "lib_opcode_num": int(lib_opcode_num),
+            "pre_match_s": pre_match_s,
+            "coarse_match_s": coarse_match_s,
+            "fine_match_s": fine_match_s,
         }
     return result
 def _load_or_build_lib_obj(lib_dex_folder: str, lib: str, logger):
@@ -1089,6 +1112,125 @@ def _match_pickle_family(pickle_stem: str, families: Set[str]) -> Optional[str]:
     return sorted(matches, key=len, reverse=True)[0]
 
 
+# TEST-ONLY: LibHunter template timing instrumentation. Remove before product launch.
+_TEMPLATE_TIMING_FIELDS = [
+    "apk_name",
+    "stage",
+    "template_name",
+    "candidate_lib",
+    "library_family",
+    "selected_version",
+    "bucket",
+    "cache_name",
+    "scope_type",
+    "scope_label",
+    "matched",
+    "result",
+    "status",
+    "similarity",
+    "detail_stage",
+    "target_class_count",
+    "pre_match_rate",
+    "coarse_match_rate",
+    "final_match_opcodes",
+    "lib_opcode_num",
+    "load_lib_s",
+    "detect_s",
+    "elapsed_s",
+    "pre_match_s",
+    "coarse_match_s",
+    "fine_match_s",
+    "lib",
+]
+
+
+def _round_seconds(value) -> float:
+    try:
+        return round(float(value), 6)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_timing_apk_stem(apk_name: str) -> str:
+    stem = str(apk_name or "").strip()
+    if stem.lower().endswith(".apk"):
+        stem = stem[:-4]
+    return stem or "apk"
+
+
+def _timing_output_dir(output_folder: str) -> str:
+    return os.environ.get("LOG_DIR") or output_folder
+
+
+def _augment_template_timing(
+    row: dict,
+    *,
+    stage: str,
+    template_name: str,
+    candidate_lib: str,
+    load_lib_s: float,
+    detect_s: float,
+    elapsed_s: float,
+    detail: dict,
+) -> dict:
+    target_classes = row.get("target_classes", []) or []
+    row.update({
+        "stage": stage,
+        "template_name": template_name,
+        "candidate_lib": candidate_lib,
+        "result": "matched" if bool(row.get("matched", False)) else "not_matched",
+        "status": "ok",
+        "detail_stage": str(detail.get("stage", "")).strip(),
+        "target_class_count": len(target_classes),
+        "pre_match_rate": float(detail.get("pre_match_rate", 0.0) or 0.0),
+        "coarse_match_rate": float(detail.get("coarse_match_rate", 0.0) or 0.0),
+        "final_match_opcodes": int(detail.get("final_match_opcodes", 0) or 0),
+        "lib_opcode_num": int(detail.get("lib_opcode_num", 0) or 0),
+        "load_lib_s": _round_seconds(load_lib_s),
+        "detect_s": _round_seconds(detect_s),
+        "elapsed_s": _round_seconds(elapsed_s),
+        "pre_match_s": _round_seconds(detail.get("pre_match_s", 0.0)),
+        "coarse_match_s": _round_seconds(detail.get("coarse_match_s", 0.0)),
+        "fine_match_s": _round_seconds(detail.get("fine_match_s", 0.0)),
+    })
+    return row
+
+
+def _write_libhunter_template_timing(
+    *,
+    output_folder: str,
+    apk_name: str,
+    rows: List[dict],
+    logger,
+) -> None:
+    timing_rows = [row for row in rows if row and row.get("elapsed_s") is not None]
+    if not timing_rows:
+        return
+
+    target_dir = _timing_output_dir(output_folder)
+    os.makedirs(target_dir, exist_ok=True)
+    apk_stem = _normalize_timing_apk_stem(apk_name)
+    csv_path = os.path.join(target_dir, f"libhunter_template_timing_{apk_stem}.csv")
+    jsonl_path = os.path.join(target_dir, f"libhunter_template_timing_{apk_stem}.jsonl")
+
+    normalized_rows = []
+    for row in timing_rows:
+        normalized = {field: row.get(field, "") for field in _TEMPLATE_TIMING_FIELDS}
+        normalized["apk_name"] = apk_name
+        normalized_rows.append(normalized)
+
+    with open(csv_path, "w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=_TEMPLATE_TIMING_FIELDS)
+        writer.writeheader()
+        writer.writerows(normalized_rows)
+
+    with open(jsonl_path, "w", encoding="utf-8") as handle:
+        for row in normalized_rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+    logger.info("[libhunter] template timing rows=%d csv=%s jsonl=%s", len(normalized_rows), csv_path, jsonl_path)
+
+
 def _extract_skeleton_scope_label(pickle_stem: str, family: str) -> str:
     base = (pickle_stem or "").strip()
     if base.endswith("_skeleton"):
@@ -1228,27 +1370,38 @@ def _detect_one_lib_detail_task(args):
     if _DETECT_APK_OBJ is None:
         return None
 
+    task_start = time.perf_counter()
+    load_lib_s = 0.0
+    detect_s = 0.0
     if isinstance(args, dict):
         lib_dex_folder = args.get("lib_dex_folder", "")
         lib = args.get("rel_path") or ""
         family = str(args.get("family", "")).strip()
         selected_version = str(args.get("version", "")).strip()
         pickle_path = args.get("pickle_path")
+        candidate_lib = str(pickle_path or lib)
+        load_start = time.perf_counter()
         if pickle_path:
             lib_obj = _load_pickled_lib_obj(str(pickle_path), logger)
         else:
             lib_obj = _load_or_build_lib_obj(lib_dex_folder, str(lib), logger)
+        load_lib_s = time.perf_counter() - load_start
     else:
         lib_dex_folder, lib = args
         family = _extract_family_from_rel_path(lib)
         selected_version = _extract_version_from_rel_path(lib)
+        candidate_lib = str(lib)
+        load_start = time.perf_counter()
         lib_obj = _load_or_build_lib_obj(lib_dex_folder, lib, logger)
+        load_lib_s = time.perf_counter() - load_start
 
     if lib_obj is None:
         return None
 
     try:
+        detect_start = time.perf_counter()
         detail = detect(_DETECT_APK_OBJ, lib_obj, logger, return_details=True)
+        detect_s = time.perf_counter() - detect_start
     except Exception as e:
         logger.error("Error in stage2 detect lib %s: %s", lib, e)
         return None
@@ -1257,7 +1410,7 @@ def _detect_one_lib_detail_task(args):
         return None
 
     lib_name = str(detail.get("library_name", "")).strip() or str(getattr(lib_obj, "lib_name", "")).strip() or str(lib)
-    return {
+    row = {
         "library_family": family,
         "selected_version": selected_version,
         "lib": lib_name,
@@ -1269,9 +1422,22 @@ def _detect_one_lib_detail_task(args):
             if str(cls).strip()
         }),
     }
+    return _augment_template_timing(
+        row,
+        stage="FullScan",
+        template_name=family,
+        candidate_lib=candidate_lib,
+        load_lib_s=load_lib_s,
+        detect_s=detect_s,
+        elapsed_s=time.perf_counter() - task_start,
+        detail=detail,
+    )
 
 
 def _detect_one_skeleton_detail_task(args):
+    task_start = time.perf_counter()
+    load_lib_s = 0.0
+    detect_s = 0.0
     if isinstance(args, dict):
         family = str(args.get("family", "")).strip()
         skeleton_pickle_path = str(args.get("pickle_path", "")).strip()
@@ -1287,12 +1453,16 @@ def _detect_one_skeleton_detail_task(args):
     if _DETECT_APK_OBJ is None:
         return None
 
+    load_start = time.perf_counter()
     lib_obj = _load_pickled_lib_obj(skeleton_pickle_path, logger)
+    load_lib_s = time.perf_counter() - load_start
     if lib_obj is None:
         return None
 
     try:
+        detect_start = time.perf_counter()
         detail = detect(_DETECT_APK_OBJ, lib_obj, logger, return_details=True)
+        detect_s = time.perf_counter() - detect_start
     except Exception as e:
         logger.error("Error in stage1 skeleton detect %s: %s", skeleton_pickle_path, e)
         return None
@@ -1305,7 +1475,7 @@ def _detect_one_skeleton_detail_task(args):
         or str(getattr(lib_obj, "lib_name", "")).strip()
         or str(family)
     )
-    return {
+    row = {
         "library_family": family,
         "selected_version": "_skeleton",
         "cache_name": cache_name,
@@ -1320,20 +1490,37 @@ def _detect_one_skeleton_detail_task(args):
             if str(cls).strip()
         }),
     }
+    return _augment_template_timing(
+        row,
+        stage="Stage1",
+        template_name=family,
+        candidate_lib=skeleton_pickle_path,
+        load_lib_s=load_lib_s,
+        detect_s=detect_s,
+        elapsed_s=time.perf_counter() - task_start,
+        detail=detail,
+    )
 
 
 def _detect_one_bucket_detail_task(args):
+    task_start = time.perf_counter()
+    load_lib_s = 0.0
+    detect_s = 0.0
     family, bucket, bucket_pickle_path = args
     logger = _DETECT_LOGGER if _DETECT_LOGGER is not None else setup_logger()
     if _DETECT_APK_OBJ is None:
         return None
 
+    load_start = time.perf_counter()
     lib_obj = _load_pickled_lib_obj(bucket_pickle_path, logger)
+    load_lib_s = time.perf_counter() - load_start
     if lib_obj is None:
         return None
 
     try:
+        detect_start = time.perf_counter()
         detail = detect(_DETECT_APK_OBJ, lib_obj, logger, return_details=True)
+        detect_s = time.perf_counter() - detect_start
     except Exception as e:
         logger.error("Error in bucket detect %s: %s", bucket_pickle_path, e)
         return None
@@ -1351,7 +1538,7 @@ def _detect_one_bucket_detail_task(args):
         for version in (getattr(lib_obj, "bucket_versions", []) or [])
         if str(version).strip()
     ]
-    return {
+    row = {
         "library_family": family,
         "bucket": bucket,
         "bucket_versions": bucket_versions,
@@ -1364,6 +1551,16 @@ def _detect_one_bucket_detail_task(args):
             if str(cls).strip()
         }),
     }
+    return _augment_template_timing(
+        row,
+        stage="Bucket",
+        template_name=family,
+        candidate_lib=bucket_pickle_path,
+        load_lib_s=load_lib_s,
+        detect_s=detect_s,
+        elapsed_s=time.perf_counter() - task_start,
+        detail=detail,
+    )
 
 
 def _detect_stage1_bucket_pipeline_task(args):
@@ -1889,6 +2086,9 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
 
         candidate_versions: List[dict] = []
         candidate_families: List[str] = []
+        skeleton_details: List[dict] = []
+        bucket_details: List[dict] = []
+        version_details: List[dict] = []
         seen_versions: Set[tuple[str, str]] = set()
 
         def _add_candidate_version(version_entry: dict) -> None:
@@ -1950,6 +2150,12 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
                         apk_name=apk,
                         detections=[],
                         apk_time_seconds=apk_time,
+                    )
+                    _write_libhunter_template_timing(
+                        output_folder=output_folder,
+                        apk_name=apk,
+                        rows=skeleton_details + bucket_details,
+                        logger=LOGGER,
                     )
                     LOGGER.info("Current apk analysis time: %d (in seconds)", apk_time)
                     continue
@@ -2073,6 +2279,12 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
                 detections=[],
                 apk_time_seconds=apk_time,
             )
+            _write_libhunter_template_timing(
+                output_folder=output_folder,
+                apk_name=apk,
+                rows=skeleton_details + bucket_details + version_details,
+                logger=LOGGER,
+            )
             continue
 
         scan_start = datetime.datetime.now()
@@ -2103,6 +2315,12 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
             apk_name=apk,
             detections=detections,
             apk_time_seconds=apk_time,
+        )
+        _write_libhunter_template_timing(
+            output_folder=output_folder,
+            apk_name=apk,
+            rows=skeleton_details + bucket_details + version_details,
+            logger=LOGGER,
         )
         LOGGER.info("Current apk analysis time: %d (in seconds)", apk_time)
 

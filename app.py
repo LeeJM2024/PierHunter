@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import Counter
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -18,11 +20,19 @@ from backend.models import AnalysisTask, User, VulnerabilityReport
 from backend.settings import settings
 from backend.tasks import run_analysis_task
 from config import ensure_runtime_dirs
+from engine.ecosystem_intel import build_ecosystem_summary
+from engine.intelligence import build_intelligence_artifact
+from engine.scan_estimator import estimate_scan_duration, profile_apk_for_estimate
 
 
 class AnalyzeRequest(BaseModel):
     filename: Optional[str] = None
     user_id: Optional[str] = None
+
+
+class IntelligenceAnalyzeRequest(BaseModel):
+    task_id: Optional[str] = None
+    report: Optional[dict] = None
 
 
 app = FastAPI(title="APK Vulnerability Scanner API", version="2.0.0")
@@ -159,6 +169,89 @@ def _candidate_log_files(task: AnalysisTask) -> list[Path]:
     return sorted(unique.values(), key=lambda p: p.name)
 
 
+def _task_report_json(task: AnalysisTask) -> dict | None:
+    if task.report and task.report.report_json is not None:
+        return task.report.report_json
+    if task.report_path:
+        path = Path(task.report_path)
+        if path.exists() and path.is_file():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return None
+    return None
+
+
+def _refresh_report_intelligence(report_json: dict) -> dict:
+    if not isinstance(report_json, dict):
+        return report_json
+    artifacts = report_json.get("analysis_artifacts")
+    if not isinstance(artifacts, dict):
+        artifacts = {}
+        report_json["analysis_artifacts"] = artifacts
+    existing = artifacts.get("intelligence")
+    if isinstance(existing, dict):
+        fallback = existing.get("fallback") if isinstance(existing.get("fallback"), dict) else {}
+        if (
+            existing.get("status") == "ok"
+            and not fallback.get("used")
+        ):
+            return report_json
+    artifacts["intelligence"] = build_intelligence_artifact(report_json, artifacts)
+    return report_json
+
+
+def _severity_from_patch_status(status: str | None) -> str:
+    normalized = str(status or "UNKNOWN").upper()
+    if normalized in {"PRESENT"}:
+        return "critical"
+    if normalized in {"PATCH_NOT_PRESENT"}:
+        return "high"
+    if normalized in {"UNKNOWN", "HUNG", "ERROR", "RESOURCE_LIMIT"}:
+        return "medium"
+    if normalized in {"PATCH_PRESENT", "NOT_PRESENT"}:
+        return "low"
+    return "info"
+
+
+def _day_label(value: datetime) -> str:
+    return value.strftime("%m/%d")
+
+
+def _seconds_between(started: datetime | None, finished: datetime | None) -> float | None:
+    if not started or not finished:
+        return None
+    return max((finished - started).total_seconds(), 0.0)
+
+
+def _report_file_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    for report_dir in (settings.report_dir, settings.project_root / "outputs" / "reports"):
+        if report_dir.exists() and report_dir.is_dir():
+            candidates.extend(sorted(report_dir.glob("*_vuln_report.json")))
+    unique: dict[str, Path] = {str(path.resolve()): path for path in candidates if path.is_file()}
+    return list(unique.values())
+
+
+def _delete_files_under(root: Path) -> int:
+    root = root.resolve()
+    if not root.exists() or not root.is_dir():
+        return 0
+    deleted = 0
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        resolved = path.resolve()
+        if root not in resolved.parents:
+            continue
+        try:
+            resolved.unlink()
+            deleted += 1
+        except OSError:
+            continue
+    return deleted
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {
@@ -167,6 +260,190 @@ def health() -> dict:
         "broker": settings.celery_broker_url,
         "storage_dir": str(settings.storage_dir),
     }
+
+
+@app.get("/api/dashboard/summary")
+def dashboard_summary(db: Session = Depends(get_db)) -> dict:
+    tasks = list(db.scalars(select(AnalysisTask).order_by(AnalysisTask.created_at.asc())))
+    completed_tasks = [task for task in tasks if task.status == "completed"]
+    failed_tasks = [task for task in tasks if task.status == "failed"]
+    running_tasks = [task for task in tasks if task.status == "running"]
+    queued_tasks = [task for task in tasks if task.status == "queued"]
+
+    reports: list[dict] = []
+    seen_report_paths: set[str] = set()
+    for task in completed_tasks:
+        report_json = _task_report_json(task)
+        if report_json is not None:
+            reports.append(report_json)
+            if task.report_path:
+                seen_report_paths.add(str(Path(task.report_path).resolve()))
+
+    for report_path in _report_file_candidates():
+        resolved = str(report_path.resolve())
+        if resolved in seen_report_paths:
+            continue
+        try:
+            report_json = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(report_json, dict):
+            reports.append(report_json)
+            seen_report_paths.add(resolved)
+
+    vulnerability_rows: list[dict] = []
+    library_rows: list[dict] = []
+    patch_evidence_count = 0
+    target_class_count = 0
+    for report in reports:
+        libraries = report.get("used_libraries") or []
+        vulnerabilities = report.get("vulnerabilities") or []
+        library_rows.extend(row for row in libraries if isinstance(row, dict))
+        vulnerability_rows.extend(row for row in vulnerabilities if isinstance(row, dict))
+
+        artifacts = report.get("analysis_artifacts") or {}
+        artifact_summary = artifacts.get("summary") or {}
+        patch_evidence_count += int(artifact_summary.get("patch_evidence_count") or 0)
+        target_class_count += int(artifact_summary.get("target_class_count") or 0)
+        if not artifact_summary:
+            patch_evidence_count += sum(1 for vuln in vulnerabilities if isinstance(vuln, dict) and vuln.get("evidence"))
+            target_class_count += sum(len(lib.get("target_classes") or []) for lib in libraries if isinstance(lib, dict))
+
+    cve_counter: Counter[str] = Counter()
+    status_counter: Counter[str] = Counter()
+    severity_counter: Counter[str] = Counter()
+    for vuln in vulnerability_rows:
+        cve_id = str(vuln.get("cve_id") or "UNKNOWN-CVE")
+        status = str(vuln.get("status") or "UNKNOWN")
+        cve_counter[cve_id] += 1
+        status_counter[status] += 1
+        severity_counter[_severity_from_patch_status(status)] += 1
+
+    library_counter: Counter[str] = Counter()
+    vulnerable_library_counter: Counter[str] = Counter()
+    for lib in library_rows:
+        name = str(lib.get("library_name") or lib.get("raw_name") or "unknown")
+        library_counter[name] += 1
+    for vuln in vulnerability_rows:
+        vulnerable_library_counter[str(vuln.get("library") or "unknown")] += 1
+
+    today = datetime.utcnow().date()
+    trend = []
+    for offset in range(6, -1, -1):
+        day = today - timedelta(days=offset)
+        day_tasks = [task for task in tasks if task.created_at and task.created_at.date() == day]
+        trend.append({
+            "day": _day_label(datetime.combine(day, datetime.min.time())),
+            "completed": sum(1 for task in day_tasks if task.status == "completed"),
+            "failed": sum(1 for task in day_tasks if task.status == "failed"),
+            "scanning": sum(1 for task in day_tasks if task.status == "running"),
+            "queued": sum(1 for task in day_tasks if task.status == "queued"),
+            "total": len(day_tasks),
+        })
+    if not tasks and reports and trend:
+        trend[-1]["completed"] = len(reports)
+        trend[-1]["total"] = len(reports)
+
+    durations = [
+        seconds
+        for seconds in (_seconds_between(task.started_at, task.finished_at) for task in completed_tasks)
+        if seconds is not None
+    ]
+    total_done = len(completed_tasks) + len(failed_tasks)
+    if total_done:
+        success_rate = round((len(completed_tasks) / total_done) * 100, 1)
+    elif reports:
+        success_rate = 100.0
+    else:
+        success_rate = 0.0
+    daily_avg = round(sum(day["total"] for day in trend) / len(trend), 1) if trend else 0.0
+
+    return {
+        "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+        "task_stats": {
+            "total_tasks": max(len(tasks), len(reports)),
+            "completed_tasks": max(len(completed_tasks), len(reports)),
+            "failed_tasks": len(failed_tasks),
+            "running_tasks": len(running_tasks),
+            "queued_tasks": len(queued_tasks),
+            "daily_avg": daily_avg,
+            "success_rate": success_rate,
+            "avg_scan_seconds": round(sum(durations) / len(durations), 2) if durations else 0.0,
+        },
+        "vulnerability_stats": {
+            "total": len(vulnerability_rows),
+            "critical": severity_counter.get("critical", 0),
+            "high": severity_counter.get("high", 0),
+            "medium": severity_counter.get("medium", 0),
+            "low": severity_counter.get("low", 0),
+            "info": severity_counter.get("info", 0),
+            "by_status": dict(status_counter),
+            "top_cves": [
+                {
+                    "id": cve_id,
+                    "count": count,
+                    "severity": _severity_from_patch_status(
+                        next((v.get("status") for v in vulnerability_rows if v.get("cve_id") == cve_id), "UNKNOWN")
+                    ),
+                }
+                for cve_id, count in cve_counter.most_common(8)
+            ],
+        },
+        "library_stats": {
+            "total_libraries": len(library_rows),
+            "unique_libraries": len(library_counter),
+            "target_class_count": target_class_count,
+            "top_libraries": [
+                {
+                    "name": name,
+                    "count": count,
+                    "vulnerability_count": vulnerable_library_counter.get(name, 0),
+                }
+                for name, count in library_counter.most_common(8)
+            ],
+        },
+        "engine_stats": {
+            "patch_evidence_count": patch_evidence_count,
+            "semantic_matches": sum(
+                1
+                for vuln in vulnerability_rows
+                if vuln.get("pre_similarity") is not None or vuln.get("post_similarity") is not None
+            ),
+            "resource_limited": status_counter.get("RESOURCE_LIMIT", 0),
+            "unknown_results": sum(status_counter.get(status, 0) for status in ("UNKNOWN", "HUNG", "ERROR", "RESOURCE_LIMIT")),
+        },
+        "trend": trend,
+    }
+
+
+@app.delete("/api/history")
+def clear_history(db: Session = Depends(get_db)) -> dict:
+    report_count = db.query(VulnerabilityReport).count()
+    task_count = db.query(AnalysisTask).count()
+    db.query(VulnerabilityReport).delete(synchronize_session=False)
+    db.query(AnalysisTask).delete(synchronize_session=False)
+    db.commit()
+
+    deleted_files = 0
+    for root in (
+        settings.report_dir,
+        settings.project_root / "outputs" / "reports",
+        settings.log_dir,
+        settings.project_root / "outputs" / "logs",
+    ):
+        deleted_files += _delete_files_under(root)
+
+    return {
+        "message": "History cleared",
+        "deleted_tasks": task_count,
+        "deleted_reports": report_count,
+        "deleted_files": deleted_files,
+    }
+
+
+@app.get("/api/ecosystem/summary")
+def ecosystem_summary() -> dict:
+    return build_ecosystem_summary()
 
 
 @app.post("/api/upload")
@@ -187,11 +464,15 @@ async def upload_apk(file: UploadFile = File(...)) -> dict:
             out.write(chunk)
 
     await file.close()
+    apk_profile = profile_apk_for_estimate(destination)
+    scan_estimate = estimate_scan_duration(apk_profile, settings.storage_dir / "scan_estimate_calibration.json")
     return {
         "message": "Upload successful",
         "filename": filename,
         "path": str(destination),
         "size": destination.stat().st_size,
+        "apk_profile": apk_profile,
+        "scan_estimate": scan_estimate,
     }
 
 
@@ -272,6 +553,7 @@ def get_report(
         raise HTTPException(status_code=404, detail="Report file not found")
 
     report_json = _read_json_file(report_path)
+    report_json = _refresh_report_intelligence(report_json)
 
     existing = None
     if selected_task is not None:
@@ -292,6 +574,31 @@ def get_report(
         "task_id": selected_task.id if selected_task else None,
         "report_path": str(report_path),
         "report": existing.report_json if existing else report_json,
+    }
+
+
+@app.post("/api/intelligence/analyze")
+def analyze_intelligence(request: IntelligenceAnalyzeRequest, db: Session = Depends(get_db)) -> dict:
+    report_json: dict | None = request.report
+    task_id = request.task_id
+
+    if report_json is None and task_id:
+        task = db.get(AnalysisTask, task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        report_json = _task_report_json(task)
+        if report_json is None:
+            raise HTTPException(status_code=404, detail="Report not ready")
+
+    if report_json is None:
+        raise HTTPException(status_code=400, detail="task_id or report is required")
+
+    artifacts = report_json.get("analysis_artifacts") if isinstance(report_json.get("analysis_artifacts"), dict) else {}
+    intelligence = build_intelligence_artifact(report_json, artifacts)
+    return {
+        "task_id": task_id,
+        "status": "ok",
+        "intelligence": intelligence,
     }
 
 

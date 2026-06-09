@@ -15,3 +15,11 @@ export function loadLastTask(): string | null {
     return null;
   }
 }
+
+export function clearLastTask(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore localStorage errors
+  }
+}

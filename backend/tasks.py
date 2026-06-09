@@ -5,8 +5,9 @@ import logging
 import os
 import select as select_module
 import subprocess
+import sys
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -16,12 +17,17 @@ from backend.db import SessionLocal, init_db
 from backend.models import AnalysisTask, VulnerabilityReport
 from backend.settings import settings
 
+if str(settings.project_root) not in sys.path:
+    sys.path.insert(0, str(settings.project_root))
+
+from engine.scan_estimator import record_completed_scan
+
 init_db()
 logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(UTC)
 
 
 def _load_report(report_path: Path) -> dict | None:
@@ -251,6 +257,15 @@ def run_analysis_task(self, task_id: str, apk_path: str) -> dict:
             return {"status": task.status, "task_id": task_id}
 
         _upsert_task_report(db, task, report_path, report_json)
+        try:
+            record_completed_scan(
+                settings.storage_dir / "scan_estimate_calibration.json",
+                Path(apk_path),
+                task.started_at,
+                task.finished_at,
+            )
+        except Exception:
+            logger.exception("failed to update scan estimate calibration for task %s", task_id)
 
         db.commit()
         return {

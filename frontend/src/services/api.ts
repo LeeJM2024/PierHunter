@@ -1,4 +1,4 @@
-import type { AnalyzeResponseRaw, ReportResponseRaw, UploadResponseRaw } from "../types/contracts";
+import type { AnalyzeResponseRaw, AnalyzeTaskRaw, DashboardSummaryRaw, EcosystemSummaryRaw, ReportResponseRaw, UploadResponseRaw } from "../types/contracts";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -54,4 +54,27 @@ export async function startAnalyze(uploadResult: Pick<UploadResponseRaw, "filena
 
 export async function fetchReport(taskId: string): Promise<ReportResponseRaw> {
   return requestJson<ReportResponseRaw>(`/api/report?task_id=${encodeURIComponent(taskId)}`);
+}
+
+export async function fetchTask(taskId: string): Promise<{ task: AnalyzeTaskRaw }> {
+  return requestJson<{ task: AnalyzeTaskRaw }>(`/api/task/${encodeURIComponent(taskId)}`);
+}
+
+export async function fetchDashboardSummary(): Promise<DashboardSummaryRaw> {
+  return requestJson<DashboardSummaryRaw>("/api/dashboard/summary");
+}
+
+export async function fetchEcosystemSummary(): Promise<EcosystemSummaryRaw> {
+  return requestJson<EcosystemSummaryRaw>("/api/ecosystem/summary");
+}
+
+export async function clearBackendHistory(): Promise<{
+  message: string;
+  deleted_tasks: number;
+  deleted_reports: number;
+  deleted_files: number;
+}> {
+  return requestJson("/api/history", {
+    method: "DELETE",
+  });
 }

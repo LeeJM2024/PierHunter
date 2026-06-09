@@ -2,10 +2,10 @@ import { ArrowRightCircle, FileText } from "lucide-react";
 import { useEffect } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { ExecutionStatusPanel } from "../components/execution/ExecutionStatusPanel";
-import { ScanProgress } from "../components/execution/ScanProgress";
 import { Panel } from "../components/common/Panel";
 import { StageBadge } from "../components/common/StageBadge";
+import { ExecutionStatusPanel } from "../components/execution/ExecutionStatusPanel";
+import { ScanProgress } from "../components/execution/ScanProgress";
 import { useTaskBootstrap } from "../hooks/useTaskBootstrap";
 import { useTaskStore } from "../store/taskStore";
 
@@ -17,6 +17,7 @@ export function ExecutionPage(): JSX.Element {
   useTaskBootstrap(taskId);
 
   const logs = useTaskStore((state) => state.logs);
+  const uploadContext = useTaskStore((state) => state.uploadContext);
   const taskStage = useTaskStore((state) => state.taskStage);
   const wsState = useTaskStore((state) => state.wsState);
   const isPollingFallback = useTaskStore((state) => state.isPollingFallback);
@@ -25,6 +26,9 @@ export function ExecutionPage(): JSX.Element {
 
   useEffect(() => {
     if (taskStage !== "REPORT_READY" || !taskId) return;
+    const key = "acchunter:auto-report-opened:first-success";
+    if (window.localStorage.getItem(key)) return;
+    window.localStorage.setItem(key, "1");
     const timer = window.setTimeout(() => {
       navigate(`/report/${taskId}`);
     }, 1200);
@@ -34,11 +38,8 @@ export function ExecutionPage(): JSX.Element {
   if (!taskId) {
     return (
       <Panel title="执行监控">
-        <p className="text-sm text-zinc-500">任务 ID 缺失，请先前往新建任务页。</p>
-        <Link
-          to="/task/new"
-          className="mt-6 inline-flex items-center gap-2 rounded-xl border border-zinc-700/50 bg-zinc-800/40 px-5 py-3 text-sm text-zinc-200 transition-all hover:border-zinc-600/60 hover:bg-zinc-700/40 hover:text-white"
-        >
+        <p className="text-sm text-zinc-500">任务 ID 缺失，请先前往新建任务页面。</p>
+        <Link to="/task/new" className="mt-6 inline-flex items-center gap-2 rounded-xl border border-zinc-700/50 bg-zinc-800/40 px-5 py-3 text-sm text-zinc-200 transition-all hover:border-zinc-600/60 hover:bg-zinc-700/40 hover:text-white">
           去新建任务
         </Link>
       </Panel>
@@ -46,7 +47,7 @@ export function ExecutionPage(): JSX.Element {
   }
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[0.36fr_0.64fr]">
+    <div className="grid gap-8 xl:grid-cols-[0.28fr_0.72fr]">
       <div className="space-y-6">
         <ExecutionStatusPanel
           taskId={taskId}
@@ -73,10 +74,7 @@ export function ExecutionPage(): JSX.Element {
         </Panel>
 
         <div className="flex flex-wrap gap-3">
-          <Link
-            to={`/report/${taskId}`}
-            className="inline-flex items-center gap-2 rounded-xl border border-zinc-700/50 bg-zinc-800/40 px-5 py-3 text-sm text-zinc-200 transition-all hover:border-zinc-600/60 hover:bg-zinc-700/40 hover:text-white"
-          >
+          <Link to={`/report/${taskId}`} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700/50 bg-zinc-800/40 px-5 py-3 text-sm text-zinc-200 transition-all hover:border-zinc-600/60 hover:bg-zinc-700/40 hover:text-white">
             <FileText className="h-4 w-4" />
             立即查看报告
           </Link>
@@ -93,15 +91,19 @@ export function ExecutionPage(): JSX.Element {
         </div>
       </div>
 
-      <Panel title="扫描进度" className="bg-zinc-900/50">
-        <ScanProgress
-          logs={logs}
-          taskStage={taskStage}
-          wsState={wsState}
-          isPollingFallback={isPollingFallback}
-          errorMessage={errorMessage}
-        />
-      </Panel>
+      <div className="space-y-6">
+        <Panel title="扫描进度" className="bg-zinc-900/50">
+          <ScanProgress
+            logs={logs}
+            taskStage={taskStage}
+            wsState={wsState}
+            isPollingFallback={isPollingFallback}
+            errorMessage={errorMessage}
+            uploadSize={uploadContext?.size ?? null}
+            scanEstimate={uploadContext?.scanEstimate ?? null}
+          />
+        </Panel>
+      </div>
     </div>
   );
 }

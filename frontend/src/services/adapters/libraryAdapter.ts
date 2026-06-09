@@ -28,6 +28,8 @@ export function adaptLibrary(
     artifact: parsed.artifact,
     version,
     confidence,
+    targetClasses: raw.target_classes || [],
+    evidence: raw.evidence || {},
     vulnerabilityCount,
     maxSeverity,
   };

@@ -37,6 +37,7 @@ function adaptVulnerability(raw: VulnerabilityRaw): VulnerabilityModel {
     status,
     preSimilarity: pre,
     postSimilarity: post,
+    evidence: raw.evidence || {},
     raw: {
       status: raw.status ?? "UNKNOWN",
       pre_similarity: pre,
@@ -123,5 +124,6 @@ export function adaptReport(raw: ReportResponseRaw, fallbackTaskId: string): Rep
     usedLibraries,
     vulnerabilities,
     summary,
+    analysisArtifacts: report.analysis_artifacts || null,
   };
 }
