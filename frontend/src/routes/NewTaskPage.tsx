@@ -12,7 +12,6 @@ export function NewTaskPage(): JSX.Element {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   const uploadAndAnalyze = useTaskStore((state) => state.uploadAndAnalyze);
-  const taskStage = useTaskStore((state) => state.taskStage);
   const uploadState = useTaskStore((state) => state.uploadState);
   const uploadContext = useTaskStore((state) => state.uploadContext);
   const errorMessage = useTaskStore((state) => state.errorMessage);

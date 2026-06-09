@@ -81,20 +81,6 @@ class _StubThirdLib:
     pass
 
 
-# Get each opcode and its corresponding number (from 1 to 232).
-def get_opcode_coding(path):
-    opcode_dict = {}
-    with open(path, "r", encoding="utf-8") as file:
-        for line in file.readlines():
-            line = line.strip("\n")
-            if line != "":
-                opcode = line[:line.find(":")]
-                num = line[line.find(":") + 1:]
-                opcode_dict[opcode] = num
-
-    return opcode_dict
-
-
 # Implement the library mapping file to which the subprocess build method belongs
 def sub_method_map_decompile(lib_folder,
                              libs,
@@ -123,46 +109,6 @@ def sub_method_map_decompile(lib_folder,
         global_lib_info_dict[lib] = lib_obj
 
 
-# 实现子进程提前反编译所有单个库
-def sub_decompile_lib(lib_folder,
-                      libs,
-                      global_lib_info_dict):
-    logger = setup_logger()
-    for lib in libs:
-        if lib not in global_lib_info_dict:
-            lib_obj = ThirdLib(lib_folder + "/" + lib, logger)
-        else:
-            lib_obj = global_lib_info_dict[lib]
-
-        global_lib_info_dict[lib] = lib_obj
-
-
-# Filter the current app class through the Bloom filter and return a collection of classes that satisfy the filter criteria
-def deal_bloom_filter(lib_class_name, lib_classes_dict, app_filter):
-    if len(lib_classes_dict[lib_class_name]) == 2:  # Indicates that it is currently an interface or abstract classc
-        lib_class_bloom_info = lib_classes_dict[lib_class_name][1]
-    else:
-        lib_class_bloom_info = lib_classes_dict[lib_class_name][3]
-
-    satisfy_classes = set()
-    satisfy_count = 0
-
-    for index in lib_class_bloom_info:
-
-        if index not in app_filter:  # Indicates that no class with this feature exists in the current app
-            return set()
-
-        # Get the set of all classes in the app that satisfy this condition
-        count = lib_class_bloom_info[index]
-        if satisfy_count == 0:
-            satisfy_classes = app_filter[index][count - 1]
-            satisfy_count += 1
-        else:
-            satisfy_classes = satisfy_classes & app_filter[index][count - 1]
-
-    return satisfy_classes
-
-
 def _match_counter(count_a: Counter, count_b: Counter):
     # Check if for every element in count_a,
     # the count is less than or equal to its count in count_b
@@ -170,34 +116,6 @@ def _match_counter(count_a: Counter, count_b: Counter):
         if count_a[element] > count_b.get(element, 0):
             return False
     return True
-
-
-def is_match(pattern, string):
-    return bool(pattern.match(string))
-
-
-def match_with_regex_new(strings, patterns):
-    n = len(patterns)
-    m = len(strings)
-
-    adj_matrix = [[is_match(pattern, string) for string in strings] for pattern in patterns]
-
-    matching = [-1] * m
-
-    def dfs(u, visited):
-        for v in range(m):
-            if adj_matrix[u][v] and not visited[v]:
-                visited[v] = True
-                if matching[v] == -1 or dfs(matching[v], visited):
-                    matching[v] = u
-                    return True
-        return False
-
-    for u in range(n):
-        visited = [False] * m
-        dfs(u, visited)
-
-    return all(match != -1 for match in matching)
 
 
 def match_with_regex(lst1, patterns):
@@ -366,26 +284,6 @@ def edit_distance_similarity(list1, list2):
     return 1 - Levenshtein.distance(list1, list2) / max(len(list1), len(list2))
 
 
-def list_intersection(list1, list2):
-    intersection = []
-    temp_list2 = list2.copy()
-    for item in list1:
-        if item in temp_list2:
-            intersection.append(item)
-            temp_list2.remove(item)
-    return intersection
-
-
-def list_union(list1, list2):
-    union = list1.copy()
-    temp_list2 = list2.copy()
-    for item in list1:
-        if item in temp_list2:
-            temp_list2.remove(item)
-    union.extend(temp_list2)
-    return union
-
-
 def jaccard_similarity(list1 :list, list2:list):
     set1 = set(list1)
     set2 = set(list2)
@@ -455,21 +353,6 @@ def calculate_intersection_ratio(list1: list, list2: list):
     # The proportion is the total number of "repeated" elements divided by the total
     # number of elements in list2.
     return repeated_count / len(list1)
-
-
-def calculate_intersection_ratio2(list1, list2):
-    set1 = set(list1)
-    set2 = set(list2)
-
-    # Check if set1 is empty to avoid division by zero errors
-    if len(set1) == 0:
-        return 1
-
-    intersection = set1.intersection(set2)
-
-    ratio = len(intersection) / len(set1)
-
-    return ratio
 
 
 # Perform a coarse-grained match between an apk and a lib, get the coarse-grained similarity value, a list of all apk classes that have completed the match
@@ -731,7 +614,6 @@ def get_method_action(node, node_dict, method_action_dict, Lib_methods_string: d
     if doInline:
         Lib_methods_string[method_name] = Lib_methods_string[method_name] + Lib_methods_string[invoke_method_name]
     if node.endswith("_1"):
-        # method_action_dict[method_name] = deal_opcode_deq(cur_action_seq)
         method_action_dict[method_name] = (cur_action_seq, callees)
         route_method_set.remove(method_name)
 
@@ -1050,65 +932,6 @@ def detect(apk_obj, lib_obj, LOGGER, return_details: bool = False):
             "lib_opcode_num": int(lib_opcode_num),
         }
     return result
-
-
-
-# Implementing child process detection
-def sub_detect_lib(lib,
-                   apk,
-                   global_apk_info_dict,
-                   global_finished_jar_dict,
-                   global_lib_info_dict):
-    # Test all versions of the same library and return a dictionary of the results (key is the jar name, value is four values)
-    logger = setup_logger()
-    start_lib = datetime.datetime.now()
-    if lib not in global_lib_info_dict:
-        logger.info("Library: %s not parsed successfully in previous step, skipped", lib)
-        return
-    result = detect(global_apk_info_dict[apk], global_lib_info_dict[lib], logger)
-    end_lib = datetime.datetime.now()
-    logger.info("Detecting libraries: %s complete, time: %d", lib, (end_lib - start_lib).seconds)
-
-    if len(result) != 0:
-        global_finished_jar_dict.update(result)
-
-
-# Implementing subthreads to determine cyclic dependency libraries based on dependencies
-def sub_find_loop_dependence_libs(libs, dependence_relation, loop_dependence_libs, shared_lock_loop_libs):
-    DG = nx.DiGraph(list(dependence_relation))
-    for lib_name in libs:
-        try:
-            nx.find_cycle(DG, source=lib_name)
-            shared_lock_loop_libs.acquire()
-            if lib_name not in loop_dependence_libs:
-                loop_dependence_libs.append(lib_name)
-            shared_lock_loop_libs.release()
-        except Exception:
-            pass
-
-
-def monitor_progress(global_running_jar_list, all_libs_num):
-    time_sec = 0
-    while True:
-        finish_num = all_libs_num - len(global_running_jar_list)
-        finish_rate = int(finish_num / all_libs_num * 100)
-        print('\r' + "current analysis: " + '▇' * (finish_rate // 2) + f'{finish_rate}%', end='')
-        if finish_num >= all_libs_num:
-            break
-        time.sleep(1)
-        time_sec += 1
-
-
-def init_worker():
-    logger = logging.getLogger()
-    # Remove all handlers associated with the root logger
-    handlers = logger.handlers[:]
-    for handler in handlers:
-        logger.removeHandler(handler)
-
-
-
-
 def _load_or_build_lib_obj(lib_dex_folder: str, lib: str, logger):
     # 扁平化 pickle 名称以支持嵌套目录结构
     flat_lib_name = lib.replace("/", "_").replace("\\", "_")
@@ -1138,13 +961,6 @@ def _load_pickled_lib_obj(pickle_path: str, logger):
     except Exception as e:
         logger.error("Error loading cached lib pickle %s: %s", pickle_path, e)
         return None
-
-
-def _build_lib_pickle_task(args):
-    lib_dex_folder, lib = args
-    logger = setup_logger()
-    lib_obj = _load_or_build_lib_obj(lib_dex_folder, lib, logger)
-    return lib, lib_obj is not None
 
 
 def _ensure_apk_descriptor_index(apk_obj) -> bool:
@@ -1407,24 +1223,6 @@ def _index_version_pickles(
         if rows
     }
 
-def _detect_one_lib_task(args):
-    lib_dex_folder, lib = args
-    logger = _DETECT_LOGGER if _DETECT_LOGGER is not None else setup_logger()
-    if _DETECT_APK_OBJ is None:
-        return None
-
-    lib_obj = _load_or_build_lib_obj(lib_dex_folder, lib, logger)
-    if lib_obj is None:
-        return None
-
-    try:
-        result = detect(_DETECT_APK_OBJ, lib_obj, logger)
-    except Exception as e:
-        logger.error("Error in detect lib %s: %s", lib, e)
-        return None
-    return result if len(result) != 0 else None
-
-
 def _detect_one_lib_detail_task(args):
     logger = _DETECT_LOGGER if _DETECT_LOGGER is not None else setup_logger()
     if _DETECT_APK_OBJ is None:
@@ -1627,100 +1425,6 @@ def _run_detection_for_versions(
             colour='blue',
         ):
             row = _detect_one_lib_detail_task(task)
-            if row:
-                details.append(row)
-    return details
-
-
-def _run_detection_for_buckets(
-    *,
-    apk_pickle_path: str,
-    buckets: Dict[str, Dict[str, str]],
-    thread_num: int,
-    apk_label: str,
-    logger,
-) -> List[dict]:
-    detect_tasks = []
-    for family, family_buckets in sorted(buckets.items()):
-        for bucket, bucket_pickle_path in sorted(family_buckets.items()):
-            detect_tasks.append((family, bucket, bucket_pickle_path))
-    if not detect_tasks:
-        return []
-
-    details: List[dict] = []
-    try:
-        with Pool(
-            processes=thread_num,
-            initializer=_init_detect_worker,
-            initargs=(apk_pickle_path,),
-        ) as pool:
-            for row in tqdm(
-                pool.imap_unordered(_detect_one_bucket_detail_task, detect_tasks),
-                total=len(detect_tasks),
-                desc=f"Bucket {apk_label}",
-                colour='magenta',
-            ):
-                if row:
-                    details.append(row)
-    except (PermissionError, OSError, RuntimeError) as e:
-        logger.warning("Pool init failed in bucket scan, fallback to serial mode: %s", e)
-        _init_detect_worker(apk_pickle_path)
-        for task in tqdm(
-            detect_tasks,
-            total=len(detect_tasks),
-            desc=f"Bucket {apk_label} (serial)",
-            colour='magenta',
-        ):
-            row = _detect_one_bucket_detail_task(task)
-            if row:
-                details.append(row)
-    return details
-
-
-def _run_detection_for_skeletons(
-    *,
-    apk_pickle_path: str,
-    skeletons: Dict[str, List[dict]],
-    thread_num: int,
-    apk_label: str,
-    logger,
-) -> List[dict]:
-    if not skeletons:
-        return []
-
-    detect_tasks = sorted(
-        [
-            dict(entry)
-            for entries in skeletons.values()
-            for entry in entries
-        ],
-        key=_skeleton_pipeline_sort_key,
-    )
-    details: List[dict] = []
-    try:
-        with Pool(
-            processes=thread_num,
-            initializer=_init_detect_worker,
-            initargs=(apk_pickle_path,),
-        ) as pool:
-            for row in tqdm(
-                pool.imap_unordered(_detect_one_skeleton_detail_task, detect_tasks),
-                total=len(detect_tasks),
-                desc=f"Stage1 {apk_label}",
-                colour='cyan',
-            ):
-                if row:
-                    details.append(row)
-    except (PermissionError, OSError, RuntimeError) as e:
-        logger.warning("Pool init failed in skeleton scan, fallback to serial mode: %s", e)
-        _init_detect_worker(apk_pickle_path)
-        for task in tqdm(
-            detect_tasks,
-            total=len(detect_tasks),
-            desc=f"Stage1 {apk_label} (serial)",
-            colour='cyan',
-        ):
-            row = _detect_one_skeleton_detail_task(task)
             if row:
                 details.append(row)
     return details
@@ -1957,11 +1661,6 @@ def _extract_candidate_scopes(skeleton_details: List[dict]) -> List[dict]:
         item.get("cache_name", ""),
     ))
     return scopes
-
-
-def _version_major(version: str) -> str:
-    match = re.search(r"\d+", str(version or ""))
-    return match.group(0) if match else ""
 
 
 def _version_numbers(version: str) -> list[int]:

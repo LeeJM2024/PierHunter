@@ -25,11 +25,6 @@ class AnalyzeRequest(BaseModel):
     user_id: Optional[str] = None
 
 
-class AnalyzeTaskCreateRequest(BaseModel):
-    filename: str
-    user_id: Optional[str] = None
-
-
 app = FastAPI(title="APK Vulnerability Scanner API", version="2.0.0")
 
 app.add_middleware(
@@ -210,23 +205,6 @@ def analyze(request: AnalyzeRequest, db: Session = Depends(get_db)) -> dict:
         "message": "Analysis queued",
         "task": _serialize_task(task),
     }
-
-
-@app.post("/api/tasks")
-async def create_task_with_upload(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-) -> dict:
-    upload_result = await upload_apk(file)
-    task = _enqueue_analysis(db, Path(upload_result["path"]), None)
-    return {"task": _serialize_task(task)}
-
-
-@app.post("/api/tasks/by-file")
-def create_task_by_filename(request: AnalyzeTaskCreateRequest, db: Session = Depends(get_db)) -> dict:
-    apk_path = _resolve_apk_path(request.filename)
-    task = _enqueue_analysis(db, apk_path, request.user_id)
-    return {"task": _serialize_task(task)}
 
 
 @app.get("/api/task/{task_id}")

@@ -1,5 +1,4 @@
 import logging
-import logging.handlers
 import multiprocessing
 import os
 import os.path
@@ -70,30 +69,3 @@ def setup_logger():
             logger.addHandler(fh)
     return logger
 
-
-def listener_process(queue):
-    logger = logging.getLogger()
-    fh = logging.FileHandler(log_file, 'a', encoding='utf-8')
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - [%(lineno)d] - %(message)s'
-    )
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-    logger.setLevel(logging.INFO)
-
-    while True:
-        record = queue.get()
-        if record is None:
-            break
-        logger.handle(record)
-
-    logger.removeHandler(fh)
-    fh.close()
-
-
-def worker_init(queue):
-    h = logging.handlers.QueueHandler(queue)
-    root = logging.getLogger()
-    root.handlers.clear()
-    root.addHandler(h)
-    root.setLevel(logging.INFO)

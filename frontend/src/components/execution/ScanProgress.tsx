@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -182,15 +182,6 @@ function ProgressBar({
   isError: boolean;
   isDone: boolean;
 }): JSX.Element {
-  const barRef = useRef<HTMLDivElement>(null);
-  const [barWidth, setBarWidth] = useState(0);
-
-  useEffect(() => {
-    if (barRef.current) {
-      setBarWidth(barRef.current.clientWidth);
-    }
-  }, []);
-
   // 进度条颜色
   const barColor = isError
     ? "from-rose-500 to-rose-400"
@@ -223,10 +214,7 @@ function ProgressBar({
       </div>
 
       {/* 进度条轨道 */}
-      <div
-        ref={barRef}
-        className="relative h-3 overflow-hidden rounded-full bg-zinc-800/80 ring-1 ring-zinc-700/50"
-      >
+      <div className="relative h-3 overflow-hidden rounded-full bg-zinc-800/80 ring-1 ring-zinc-700/50">
         {/* 背景光晕 */}
         <div
           className={`absolute inset-0 rounded-full bg-gradient-to-r ${barColor} opacity-5`}

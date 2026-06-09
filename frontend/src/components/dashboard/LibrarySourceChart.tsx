@@ -1,4 +1,4 @@
-import { PieChart, Download, Globe, Package, Shield, Database, Zap, Layers } from "lucide-react";
+import { Layers, PieChart, Zap } from "lucide-react";
 import { mockLibrarySourceData, mockTotalLibraries, mockComponentRiskData } from "./mockData";
 
 interface SourceData {
@@ -13,15 +13,6 @@ interface SourceData {
 export function LibrarySourceChart(): JSX.Element {
   const sourceData: SourceData[] = mockLibrarySourceData;
   const totalLibraries = mockTotalLibraries;
-  
-  // 图标映射
-  const iconMap: Record<string, JSX.Element> = {
-    "🌐": <Globe className="h-3 w-3 text-blue-400" />,
-    "📦": <Package className="h-3 w-3 text-purple-400" />,
-    "⬇️": <Download className="h-3 w-3 text-emerald-400" />,
-    "🔒": <Shield className="h-3 w-3 text-amber-400" />,
-    "❓": <div className="h-3 w-3 rounded-full bg-slate-400"></div>
-  };
   
   return (
     <div className="space-y-4">
@@ -47,7 +38,7 @@ export function LibrarySourceChart(): JSX.Element {
           
           {(() => {
             let accumulatedPercentage = 0;
-            return sourceData.map((source, index) => {
+            return sourceData.map((source) => {
               const startAngle = (accumulatedPercentage / 100) * 360;
               const endAngle = ((accumulatedPercentage + source.percentage) / 100) * 360;
               accumulatedPercentage += source.percentage;
@@ -93,7 +84,7 @@ export function LibrarySourceChart(): JSX.Element {
       
       {/* 图例和数据 */}
       <div className="space-y-2">
-        {sourceData.map((source, index) => (
+        {sourceData.map((source) => (
           <div key={source.name} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-800/30 transition-all hover:scale-[1.01] group">
             <div className="flex items-center gap-3">
               <div className={`h-3 w-3 rounded-full ${source.color} group-hover:scale-125 transition-transform`}></div>
@@ -121,7 +112,7 @@ export function LibrarySourceChart(): JSX.Element {
         </div>
         
         <div className="space-y-2">
-          {mockComponentRiskData.map((component, index) => (
+          {mockComponentRiskData.map((component) => (
             <div key={component.name} className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className={`h-2 w-2 rounded-full ${

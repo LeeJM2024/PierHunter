@@ -1,4 +1,4 @@
-import { Activity, Bot, FileBadge2, LayoutDashboard, ShieldCheck, UploadCloud, Terminal, Cpu } from "lucide-react";
+import { Activity, Cpu, FileBadge2, LayoutDashboard, ShieldCheck, Terminal, UploadCloud } from "lucide-react";
 import type { PropsWithChildren } from "react";
 import { NavLink } from "react-router-dom";
 

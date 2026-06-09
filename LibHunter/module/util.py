@@ -1,62 +1,9 @@
-import re
-
 def valid_method_name(method_full_name):
     method_full_name = method_full_name.replace(" ", "")
     class_name = method_full_name[1:method_full_name.find(";")].replace("/",
                                                                         ".")  # com.google.android.gms.internal.bn.onPause()V
     other = method_full_name[method_full_name.find(";") + 1:]  #
     return class_name + "." + other
-
-def read_file_to_list(path, mode='r', encoding='utf-8'):
-    lines_list = []
-    with open(path, mode, encoding=encoding) as file:
-        for line in file.readlines():
-            lines_list.append(line.strip("\n"))
-    return lines_list
-
-
-def generate_regex(input_string):
-    escaped_input = re.escape(input_string)
-
-    regex_pattern = re.sub(r'\\\{.*?\\\}\\#', r'(\\{.*?\\})?', escaped_input)
-
-    regex_pattern = regex_pattern.replace('\\#', '')
-
-    return re.compile(regex_pattern)
-
-
-def convert_to_optional_regex(input_string):
-    matches = re.findall(r'\{.*?\}#?', input_string)
-
-    regex_parts = []
-    for match in matches:
-        if match.endswith('#'):
-            part = re.escape(match[:-1]) + '?'
-        else:
-            part = re.escape(match)
-
-        regex_parts.append(part)
-
-    final_regex = '^' + ''.join(regex_parts) + '$'
-    return re.compile(final_regex)
-
-
-def split_list_n_list(origin_list, n):
-    if len(origin_list) % n == 0:
-        cnt = len(origin_list) // n
-    else:
-        cnt = len(origin_list) // n + 1
-
-    for i in range(0, n):
-        yield origin_list[i * cnt:(i + 1) * cnt]
-
-
-def deal_opcode_deq(opcode_seq):
-    new_seq = ""
-    for seq in set(opcode_seq.split(" ")):
-        new_seq = new_seq + seq + " "
-    return new_seq[:-1]
-
 
 def toMillisecond(start_time, end_time):
     return (end_time - start_time).seconds * 1000 + (end_time - start_time).microseconds / 1000

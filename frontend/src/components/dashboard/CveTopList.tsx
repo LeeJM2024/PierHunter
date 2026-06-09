@@ -1,4 +1,4 @@
-import { AlertTriangle, Flame, Shield, TrendingUp, Database, Zap, Skull, ExternalLink } from "lucide-react";
+import { AlertTriangle, ExternalLink, Flame, Shield, Skull, TrendingUp, Zap } from "lucide-react";
 import { mockTopCves, mockVulnerabilityStats } from "./mockData";
 import type { SeverityLevel } from "../../types/domain";
 
@@ -64,13 +64,6 @@ export function CveTopList(): JSX.Element {
     if (score >= 7.0) return 'text-orange-500';
     if (score >= 4.0) return 'text-amber-500';
     return 'text-emerald-500';
-  };
-  
-  const getCvssBg = (score: number) => {
-    if (score >= 9.0) return 'bg-rose-500/20';
-    if (score >= 7.0) return 'bg-orange-500/20';
-    if (score >= 4.0) return 'bg-amber-500/20';
-    return 'bg-emerald-500/20';
   };
   
   return (

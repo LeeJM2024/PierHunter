@@ -1,5 +1,3 @@
-import type { SeverityLevel } from "../types/domain";
-
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "-";
   if (bytes < 1024) return `${bytes} B`;
@@ -16,21 +14,6 @@ export function formatRatio(value: number | null | undefined): string {
 export function clamp01(value: number | null | undefined): number {
   if (value == null || !Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
-}
-
-export function severityRank(level: SeverityLevel): number {
-  switch (level) {
-    case "critical":
-      return 5;
-    case "high":
-      return 4;
-    case "medium":
-      return 3;
-    case "low":
-      return 2;
-    default:
-      return 1;
-  }
 }
 
 export function shortHash(value: string): string {

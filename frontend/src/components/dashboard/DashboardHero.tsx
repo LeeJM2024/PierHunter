@@ -1,4 +1,4 @@
-import { ArrowRight, Radar, Database, Code, GitBranch, Zap, Layers, FileCode, Network, Bug, Shield, Activity, BarChart3, Cpu } from "lucide-react";
+import { ArrowRight, BarChart3, Bug, Code, Cpu, Database, FileCode, GitBranch, Layers, Network, Radar, Shield, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Panel } from "../common/Panel";
