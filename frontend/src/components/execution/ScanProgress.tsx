@@ -24,19 +24,19 @@ const SCAN_PHASES: ScanPhase[] = [
   },
   {
     key: "libhunter",
-    label: "LibHunter 组件识别",
+    label: "库版本识别",
     icon: <FileSearch className="h-4 w-4" />,
     startWeight: 8,
     endWeight: 35,
-    keywords: ["LibHunter", "第三方库", "组件识别", "library"],
+    keywords: ["第三方库", "组件识别", "库版本", "library"],
   },
   {
     key: "phunter",
-    label: "PHunter 补丁验证",
+    label: "补丁验证",
     icon: <Shield className="h-4 w-4" />,
     startWeight: 35,
     endWeight: 85,
-    keywords: ["PHunter", "补丁", "漏洞", "验证", "patch", "CVE"],
+    keywords: ["补丁", "漏洞", "验证", "patch", "CVE"],
   },
   {
     key: "report",

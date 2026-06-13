@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections import Counter
 from datetime import datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -151,6 +153,155 @@ def _read_json_file(path: Path) -> dict:
         raise HTTPException(status_code=500, detail=f"Invalid report JSON: {exc}") from exc
 
 
+@lru_cache(maxsize=1)
+def _load_cve_kb() -> list[dict]:
+    kb_path = settings.project_root / "data" / "cve_kb.json"
+    try:
+        data = json.loads(kb_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+
+def _library_match_keys(name: str | None) -> set[str]:
+    raw = str(name or "").strip().lower()
+    if not raw:
+        return set()
+    variants = {
+        raw,
+        raw.replace(":", "."),
+        raw.replace(".", ":"),
+        raw.replace("_", "-"),
+    }
+    parts = re.split(r"[:./]", raw)
+    if parts:
+        variants.add(parts[-1])
+    return {variant for variant in variants if variant}
+
+
+def _version_sort_key(version: str) -> tuple:
+    pieces = re.split(r"([0-9]+)", str(version))
+    key: list[tuple[int, object]] = []
+    for piece in pieces:
+        if not piece:
+            continue
+        if piece.isdigit():
+            key.append((0, int(piece)))
+        else:
+            key.append((1, piece.lower()))
+    return tuple(key)
+
+
+def _extract_post_patch_version(record: dict) -> str | None:
+    cve_id = str(record.get("cve_id") or "")
+    artifact = Path(str(record.get("post_patch_jar") or "")).name
+    if not cve_id or not artifact:
+        return None
+    marker = f"-{cve_id}-"
+    if marker not in artifact:
+        return None
+    prefix = artifact.split(marker, 1)[0]
+    match = re.search(r"([0-9][0-9A-Za-z._+-]*)$", prefix)
+    return match.group(1) if match else None
+
+
+def _timeline_record_matches_library(record: dict, library_name: str) -> bool:
+    library_keys = _library_match_keys(library_name)
+    record_keys = _library_match_keys(record.get("library_name"))
+    for alias in record.get("aliases") or []:
+        record_keys.update(_library_match_keys(alias))
+    return bool(library_keys & record_keys)
+
+
+def _build_cve_version_timeline(report_json: dict) -> list[dict]:
+    libraries = [item for item in report_json.get("used_libraries") or [] if isinstance(item, dict)]
+    vulnerabilities = [item for item in report_json.get("vulnerabilities") or [] if isinstance(item, dict)]
+    if not libraries or not vulnerabilities:
+        return []
+
+    kb = _load_cve_kb()
+    timeline: list[dict] = []
+    for library in libraries:
+        library_name = str(library.get("library_name") or library.get("raw_name") or "").strip()
+        detected_version = str(library.get("version") or "-").strip()
+        related_vulns = [
+            vuln for vuln in vulnerabilities
+            if str(vuln.get("library") or "").strip() == library_name
+        ]
+        if not library_name or not related_vulns:
+            continue
+
+        cve_items: list[dict] = []
+        all_versions: set[str] = set()
+        if detected_version and detected_version != "-":
+            all_versions.add(detected_version)
+
+        for vuln in related_vulns:
+            cve_id = str(vuln.get("cve_id") or "").strip()
+            if not cve_id:
+                continue
+            matching_records = [
+                record for record in kb
+                if str(record.get("cve_id") or "") == cve_id
+                and _timeline_record_matches_library(record, library_name)
+            ]
+            if not matching_records:
+                cve_items.append({
+                    "cve_id": cve_id,
+                    "status": vuln.get("status") or "UNKNOWN",
+                    "affected_versions": [],
+                    "affected_from": None,
+                    "affected_to": None,
+                    "fixed_version": None,
+                    "current_affected": False,
+                    "knowledge_status": "missing",
+                })
+                continue
+
+            affected_versions = sorted(
+                {
+                    str(version)
+                    for record in matching_records
+                    for version in (record.get("affected_versions") or [])
+                    if str(version).strip()
+                },
+                key=_version_sort_key,
+            )
+            fixed_versions = sorted(
+                {
+                    version
+                    for record in matching_records
+                    for version in [_extract_post_patch_version(record)]
+                    if version
+                },
+                key=_version_sort_key,
+            )
+            all_versions.update(affected_versions)
+            all_versions.update(fixed_versions)
+
+            cve_items.append({
+                "cve_id": cve_id,
+                "status": vuln.get("status") or "UNKNOWN",
+                "affected_versions": affected_versions,
+                "affected_from": affected_versions[0] if affected_versions else None,
+                "affected_to": affected_versions[-1] if affected_versions else None,
+                "fixed_version": fixed_versions[0] if fixed_versions else None,
+                "current_affected": detected_version in affected_versions,
+                "knowledge_status": "matched",
+            })
+
+        sorted_versions = sorted(all_versions, key=_version_sort_key)
+        timeline.append({
+            "library_name": library_name,
+            "detected_version": detected_version,
+            "versions": sorted_versions,
+            "current_version_index": sorted_versions.index(detected_version) if detected_version in sorted_versions else -1,
+            "cves": sorted(cve_items, key=lambda item: (not item.get("current_affected"), item.get("cve_id") or "")),
+        })
+
+    return timeline
+
+
 def _candidate_log_files(task: AnalysisTask) -> list[Path]:
     candidates: list[Path] = []
     for path_text in (task.stdout_log_path, task.stderr_log_path):
@@ -185,6 +336,7 @@ def _task_report_json(task: AnalysisTask) -> dict | None:
 def _refresh_report_intelligence(report_json: dict) -> dict:
     if not isinstance(report_json, dict):
         return report_json
+    report_json["cve_version_timeline"] = _build_cve_version_timeline(report_json)
     artifacts = report_json.get("analysis_artifacts")
     if not isinstance(artifacts, dict):
         artifacts = {}
@@ -507,17 +659,18 @@ def get_task_report(task_id: str, db: Session = Depends(get_db)) -> dict:
 
     report = task.report
     if report and report.report_json is not None:
+        report_json = _refresh_report_intelligence(report.report_json)
         return {
             "task_id": task.id,
             "report_path": report.report_path,
-            "report": report.report_json,
+            "report": report_json,
         }
 
     report_path = Path(task.report_path) if task.report_path else None
     if not report_path:
         raise HTTPException(status_code=404, detail="Report path missing")
 
-    report_json = _read_json_file(report_path)
+    report_json = _refresh_report_intelligence(_read_json_file(report_path))
     return {
         "task_id": task.id,
         "report_path": str(report_path),

@@ -1,5 +1,5 @@
-import type { ReportResponseRaw, UsedLibraryRaw, VulnerabilityRaw } from "../../types/contracts";
-import type { ReportModel, SeverityLevel, UsedLibraryModel, VulnerabilityModel } from "../../types/domain";
+import type { CveVersionTimelineRaw, ReportResponseRaw, UsedLibraryRaw, VulnerabilityRaw } from "../../types/contracts";
+import type { CveVersionTimelineModel, ReportModel, SeverityLevel, UsedLibraryModel, VulnerabilityModel } from "../../types/domain";
 import { buildVulnerabilityId } from "../../utils/identity";
 import { adaptLibrary } from "./libraryAdapter";
 import { adaptPatchStatus } from "./statusAdapter";
@@ -83,6 +83,29 @@ function buildLibraryModels(rawLibraries: UsedLibraryRaw[], vulnerabilities: Vul
   });
 }
 
+function adaptVersionTimeline(rows: CveVersionTimelineRaw[]): CveVersionTimelineModel[] {
+  return rows.map((row) => {
+    const cves = (row.cves || []).map((item) => ({
+      cveId: item.cve_id || "UNKNOWN-CVE",
+      status: adaptPatchStatus(item.status),
+      affectedVersions: item.affected_versions || [],
+      affectedFrom: item.affected_from || null,
+      affectedTo: item.affected_to || null,
+      fixedVersion: item.fixed_version || null,
+      currentAffected: Boolean(item.current_affected),
+      knowledgeStatus: item.knowledge_status || "missing",
+    }));
+
+    return {
+      libraryName: row.library_name || "unknown",
+      detectedVersion: row.detected_version || "-",
+      versions: row.versions || [],
+      currentVersionIndex: Number.isFinite(row.current_version_index) ? Number(row.current_version_index) : -1,
+      cves,
+    };
+  }).filter((row) => row.versions.length > 0 || row.cves.length > 0);
+}
+
 export function adaptReport(raw: ReportResponseRaw, fallbackTaskId: string): ReportModel {
   const report = raw.report || {};
   const vulnerabilities = (report.vulnerabilities || []).map(adaptVulnerability);
@@ -123,6 +146,7 @@ export function adaptReport(raw: ReportResponseRaw, fallbackTaskId: string): Rep
     },
     usedLibraries,
     vulnerabilities,
+    cveVersionTimeline: adaptVersionTimeline(report.cve_version_timeline || []),
     summary,
     analysisArtifacts: report.analysis_artifacts || null,
   };

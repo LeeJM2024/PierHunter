@@ -74,7 +74,7 @@ export function EvidencePanel({ vulnerability }: { vulnerability: VulnerabilityM
         </div>
         <div className="rounded-lg border border-slate-700/70 bg-slate-950/65 p-3">
           <p className="font-semibold text-slate-100">验证执行</p>
-          <p className="mt-2 text-slate-400">PHunter 状态: <span className="text-slate-200">{display(verification.status)}</span></p>
+          <p className="mt-2 text-slate-400">补丁验证状态: <span className="text-slate-200">{display(verification.status)}</span></p>
           <p className="mt-1 text-slate-400">Return Code: <span className="text-slate-200">{display(verification.returncode)}</span></p>
           <p className="mt-1 text-slate-400">重试: <span className="text-slate-200">{display(verification.retried)}</span></p>
           <p className="mt-1 text-slate-400">补丁相关方法: <span className="text-slate-200">{display(verification.patch_related_method_count)}</span></p>
@@ -112,7 +112,7 @@ export function EvidencePanel({ vulnerability }: { vulnerability: VulnerabilityM
         <p className="mt-1">raw.status: {String(vulnerability.raw.status)}</p>
         <p>raw.pre_similarity: {String(vulnerability.raw.pre_similarity)}</p>
         <p>raw.post_similarity: {String(vulnerability.raw.post_similarity)}</p>
-        <p>phunter.returncode: {display(verification.returncode)}</p>
+        <p>patch.returncode: {display(verification.returncode)}</p>
         <p>stdout.lines: {display(asRecord(execution.stdout).line_count)}</p>
         <p>stderr.lines: {display(asRecord(execution.stderr).line_count)}</p>
       </div>

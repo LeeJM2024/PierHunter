@@ -105,6 +105,7 @@ export interface ReportRaw {
   used_libraries?: UsedLibraryRaw[];
   vulnerabilities?: VulnerabilityRaw[];
   analysis_artifacts?: AnalysisArtifactsRaw;
+  cve_version_timeline?: CveVersionTimelineRaw[];
 }
 
 export interface ReportResponseRaw {
@@ -147,6 +148,25 @@ export interface AnalysisArtifactsRaw {
   };
   intelligence?: Record<string, unknown>;
   summary?: Record<string, unknown>;
+}
+
+export interface CveVersionTimelineItemRaw {
+  cve_id?: string;
+  status?: PatchStatusRaw;
+  affected_versions?: string[];
+  affected_from?: string | null;
+  affected_to?: string | null;
+  fixed_version?: string | null;
+  current_affected?: boolean;
+  knowledge_status?: "matched" | "missing" | string;
+}
+
+export interface CveVersionTimelineRaw {
+  library_name?: string;
+  detected_version?: string;
+  versions?: string[];
+  current_version_index?: number;
+  cves?: CveVersionTimelineItemRaw[];
 }
 
 export interface DashboardSummaryRaw {

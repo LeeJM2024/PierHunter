@@ -88,8 +88,28 @@ export interface ReportModel {
   apkInfo: ApkInfoModel;
   usedLibraries: UsedLibraryModel[];
   vulnerabilities: VulnerabilityModel[];
+  cveVersionTimeline: CveVersionTimelineModel[];
   summary: ReportSummary;
   analysisArtifacts: AnalysisArtifactsRaw | null;
+}
+
+export interface CveVersionTimelineItemModel {
+  cveId: string;
+  status: PatchStatusSemantic;
+  affectedVersions: string[];
+  affectedFrom: string | null;
+  affectedTo: string | null;
+  fixedVersion: string | null;
+  currentAffected: boolean;
+  knowledgeStatus: string;
+}
+
+export interface CveVersionTimelineModel {
+  libraryName: string;
+  detectedVersion: string;
+  versions: string[];
+  currentVersionIndex: number;
+  cves: CveVersionTimelineItemModel[];
 }
 
 export interface LogEntry {

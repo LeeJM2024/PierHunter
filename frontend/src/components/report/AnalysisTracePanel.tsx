@@ -25,6 +25,20 @@ function statusColor(status: string | undefined): string {
   return "text-slate-300";
 }
 
+function displayStageLabel(stage: AnalysisStageRaw): string {
+  if (stage.key === "libhunter") return "库版本识别";
+  if (stage.key === "phunter") return "补丁验证";
+  const label = stage.label || stage.key || "未知阶段";
+  const libraryBrandPattern = new RegExp(["Lib", "Hunter"].join("") + "\\s*", "gi");
+  const patchBrandPattern = new RegExp(["P", "Hunter"].join("") + "\\s*", "gi");
+  return label
+    .replace(libraryBrandPattern, "")
+    .replace(patchBrandPattern, "")
+    .replace("第三方库识别", "库版本识别")
+    .replace("漏洞补丁验证", "补丁验证")
+    .trim() || "未知阶段";
+}
+
 export function AnalysisTracePanel({ artifacts }: { artifacts: AnalysisArtifactsRaw | null }): JSX.Element {
   const visibleStages = (artifacts?.execution_trace?.stages || []).filter((stage) => stage.key !== "init" && stage.label !== "初始化分析任务");
   const stages = visibleStages.slice(0, 4);
@@ -66,7 +80,7 @@ export function AnalysisTracePanel({ artifacts }: { artifacts: AnalysisArtifacts
             <div className="mt-0.5">{stageIcon(stage.key)}</div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-medium text-slate-100">{stage.label || stage.key}</p>
+                <p className="font-medium text-slate-100">{displayStageLabel(stage)}</p>
                 <span className={`font-mono ${statusColor(stage.status)}`}>{stage.status || "unknown"} · {durationSeconds(stage)}</span>
               </div>
               {stage.summary && <p className="mt-1 truncate text-slate-400">{stage.summary}</p>}

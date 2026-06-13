@@ -1,11 +1,12 @@
-import { FileWarning, FlaskConical } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { Download, FileWarning, FlaskConical } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { Panel } from "../components/common/Panel";
 import { ErrorView, LoadingView } from "../components/common/StateView";
 import { AnalysisTracePanel } from "../components/report/AnalysisTracePanel";
 import { CopilotPanel } from "../components/report/CopilotPanel";
+import { CveVersionTimeline } from "../components/report/CveVersionTimeline";
 import { EvidencePanel } from "../components/report/EvidencePanel";
 import { LibrariesTable } from "../components/report/LibrariesTable";
 import { ReportSummaryCards } from "../components/report/ReportSummaryCards";
@@ -13,6 +14,7 @@ import { SbomGraph } from "../components/report/SbomGraph";
 import { VulnerabilityTable } from "../components/report/VulnerabilityTable";
 import { useTaskStore } from "../store/taskStore";
 import { formatBytes, shortHash } from "../utils/format";
+import { downloadDetectionReport } from "../utils/reportDownload";
 
 export function ReportPage(): JSX.Element {
   const params = useParams();
@@ -25,6 +27,7 @@ export function ReportPage(): JSX.Element {
   const selectedLibraryId = useTaskStore((state) => state.selectedLibraryId);
   const setActiveVulnerability = useTaskStore((state) => state.setActiveVulnerability);
   const setSelectedLibrary = useTaskStore((state) => state.setSelectedLibrary);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const report = taskId ? reportsByTask[taskId] || null : null;
 
@@ -84,8 +87,36 @@ export function ReportPage(): JSX.Element {
 
   if (!report) return <LoadingView text="报告加载中..." />;
 
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    try {
+      await downloadDetectionReport(report);
+    } catch (error) {
+      console.error(error);
+      window.alert("PDF 报告生成失败，请刷新页面后重试。");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-[0.28em] text-cyan-200/70">Security Report</p>
+          <h1 className="mt-1 text-xl font-semibold text-slate-100">检测报告</h1>
+        </div>
+        <button
+          type="button"
+          onClick={() => void handleDownload()}
+          disabled={isDownloading}
+          className="inline-flex h-11 items-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-4 text-sm font-semibold text-emerald-100 shadow-[0_0_24px_rgba(16,185,129,0.12)] transition hover:border-emerald-300/70 hover:bg-emerald-500/25 focus:outline-none focus:ring-2 focus:ring-emerald-300/50 disabled:cursor-wait disabled:opacity-60"
+        >
+          <Download className="h-4 w-4" />
+          {isDownloading ? "正在生成报告..." : "下载检测报告"}
+        </button>
+      </div>
+
       <ReportSummaryCards report={report} />
 
       <div className="grid gap-6 xl:grid-cols-[0.36fr_0.64fr]">
@@ -108,6 +139,10 @@ export function ReportPage(): JSX.Element {
             <p className="mt-1 text-slate-100">{formatBytes(report.apkInfo.size)}</p>
           </div>
         </div>
+      </Panel>
+
+      <Panel title="CVE 影响版本演进时间轴">
+        <CveVersionTimeline timelines={report.cveVersionTimeline} />
       </Panel>
 
       <div className="grid gap-6 xl:grid-cols-[0.58fr_0.42fr]">
