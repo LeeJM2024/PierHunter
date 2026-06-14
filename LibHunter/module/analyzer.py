@@ -51,6 +51,8 @@ HEAVY_BUCKET_PRIORITY = (
     "com.fasterxml.jackson.core.jackson-databind",
 )
 
+HIGH_RISK_STAGE1_THRESHOLD_FACTOR = 0.5
+
 HIGH_RISK_FULL_SCAN_FAMILIES = {
     "androidx.room.room-runtime",
     "com.squareup.okhttp3.okhttp",
@@ -1444,11 +1446,17 @@ def _detect_one_skeleton_detail_task(args):
         cache_name = str(args.get("cache_name", "")).strip()
         scope_type = str(args.get("scope_type", "library")).strip() or "library"
         scope_label = str(args.get("scope_label", "")).strip()
+        lib_threshold = float(args.get("lib_threshold", lib_similar))
+        class_threshold = float(args.get("class_threshold", class_similar))
+        method_threshold = float(args.get("method_threshold", method_similar))
     else:
         family, skeleton_pickle_path = args
         cache_name = os.path.basename(str(skeleton_pickle_path))
         scope_label = ""
         scope_type = "library"
+        lib_threshold = lib_similar
+        class_threshold = class_similar
+        method_threshold = method_similar
     logger = _DETECT_LOGGER if _DETECT_LOGGER is not None else setup_logger()
     if _DETECT_APK_OBJ is None:
         return None
@@ -1461,7 +1469,15 @@ def _detect_one_skeleton_detail_task(args):
 
     try:
         detect_start = time.perf_counter()
-        detail = detect(_DETECT_APK_OBJ, lib_obj, logger, return_details=True)
+        detail = detect(
+            _DETECT_APK_OBJ,
+            lib_obj,
+            logger,
+            return_details=True,
+            lib_threshold=lib_threshold,
+            class_threshold=class_threshold,
+            method_threshold=method_threshold,
+        )
         detect_s = time.perf_counter() - detect_start
     except Exception as e:
         logger.error("Error in stage1 skeleton detect %s: %s", skeleton_pickle_path, e)
@@ -2040,15 +2056,19 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
         logger=LOGGER,
     )
     libs_list = [lib for versions in lib_groups.values() for lib in versions]
-    stage1_skeleton_pickles = {
-        family: entries
-        for family, entries in skeleton_pickles.items()
-        if family not in HIGH_RISK_FULL_SCAN_FAMILIES
-    }
+    stage1_skeleton_pickles = {}
+    for family, entries in skeleton_pickles.items():
+        family_entries = [dict(entry) for entry in entries]
+        if family in HIGH_RISK_FULL_SCAN_FAMILIES:
+            for entry in family_entries:
+                entry["lib_threshold"] = lib_similar * HIGH_RISK_STAGE1_THRESHOLD_FACTOR
+                entry["class_threshold"] = class_similar * HIGH_RISK_STAGE1_THRESHOLD_FACTOR
+                entry["method_threshold"] = method_similar * HIGH_RISK_STAGE1_THRESHOLD_FACTOR
+        stage1_skeleton_pickles[family] = family_entries
     LOGGER.info(
-        "[libhunter] high-risk full-scan families=%d versions=%d",
+        "[libhunter] high-risk relaxed stage1 families=%d skeletons=%d",
         len(HIGH_RISK_FULL_SCAN_FAMILIES),
-        sum(len(version_index.get(family, [])) for family in HIGH_RISK_FULL_SCAN_FAMILIES),
+        sum(len(stage1_skeleton_pickles.get(family, [])) for family in HIGH_RISK_FULL_SCAN_FAMILIES),
     )
     LOGGER.info("[libhunter] version pickles load on demand in stage2")
 
@@ -2101,27 +2121,6 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
             seen_versions.add(key)
             candidate_versions.append(version_entry)
 
-        high_risk_versions_added = 0
-        for family in sorted(HIGH_RISK_FULL_SCAN_FAMILIES):
-            before_count = len(candidate_versions)
-            for version_entry in version_index.get(family, []):
-                _add_candidate_version(version_entry)
-            added = len(candidate_versions) - before_count
-            high_risk_versions_added += added
-            if added:
-                LOGGER.info(
-                    "[libhunter] %s high-risk full scan family=%s versions=%d",
-                    apk,
-                    family,
-                    added,
-                )
-        if high_risk_versions_added:
-            LOGGER.info(
-                "[libhunter] %s high-risk full scan versions added=%d",
-                apk,
-                high_risk_versions_added,
-            )
-
         if stage1_skeleton_pickles:
             skeleton_details, bucket_details, pipeline_stats = _run_stage1_bucket_pipeline(
                 apk_pickle_path=apk_pickle_path,
@@ -2141,7 +2140,7 @@ def _search_libs_in_app_multiprocess(lib_dex_folder=None,
                 pipeline_stats.get("pipeline_time", 0),
             )
             if not candidate_families:
-                LOGGER.info("[libhunter] %s no stage1 candidates outside high-risk families", apk)
+                LOGGER.info("[libhunter] %s no stage1 candidates", apk)
                 if not candidate_versions:
                     apk_time_end = datetime.datetime.now()
                     apk_time = (apk_time_end - apk_time_start).seconds
